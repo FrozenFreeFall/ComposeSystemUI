@@ -1,0 +1,6 @@
+# Copy to platform-signing.properties and use YOUR DEVICE'S platform keystore.
+# Use forward slashes for Windows paths. Never commit actual keys/passwords.
+storeFile=D:/android-keys/platform.jks
+storePassword=REPLACE_ME
+keyAlias=platform
+keyPassword=REPLACE_ME
