@@ -8,6 +8,8 @@ import android.app.Service
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.content.res.Configuration
+import android.os.Build
+import android.provider.Settings
 import android.os.IBinder
 import android.util.Log
 import android.widget.Toast
@@ -32,13 +34,13 @@ class SystemUIService : Service() {
         super.onCreate()
         try {
             startForegroundNotification()
-            PlatformWindowApi.requireSystemEnvironment(this)
+            check(Settings.canDrawOverlays(this)) { "请先在控制台授权悬浮窗" }
             store = SystemUiStore(scope)
             actions = SystemActionExecutor(this)
             windows = SystemWindowHost(this, store)
             windows.attach()
             ready = true
-            app.reportStatus(ServiceStatus(true, "系统窗口已挂载：2000 / 2019 / 2040"))
+            app.reportStatus(ServiceStatus(true, "普通应用悬浮窗已显示：状态栏 / 导航栏 / 快捷面板"))
             scope.launch { store.state.collect { windows.render(it) } }
             scope.launch { app.deviceRepository.observe().collect { store.dispatch(SystemUiIntent.DeviceChanged(it)) } }
             scope.launch {
@@ -114,7 +116,11 @@ class SystemUIService : Service() {
             .setContentText("状态栏 / 导航栏 / 快捷面板正在运行")
             .setContentIntent(launcher).setOngoing(true)
             .addAction(Notification.Action.Builder(null, "停止", stop).build()).build()
-        startForeground(100, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
+        if (Build.VERSION.SDK_INT >= 34) {
+            startForeground(100, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
+        } else {
+            startForeground(100, notification)
+        }
     }
 
     private fun fail(error: Throwable) {

@@ -1,11 +1,18 @@
 package com.example.simplesystemui.platform
 
+import android.app.Activity
 import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Insets
+import android.net.Uri
 import android.os.Binder
 import android.os.Process
+import android.provider.Settings
+import android.view.Gravity
+import android.view.LayoutInflater
 import android.view.WindowManager
+import com.example.simplesystemui.R
 import java.lang.reflect.Array as ReflectArray
 
 /** All non-SDK window access is isolated here. Intended ONLY for platform-authorized system UID. */
@@ -31,4 +38,5 @@ object PlatformWindowApi {
         ReflectArray.set(array, 0, provider)
         WindowManager.LayoutParams::class.java.getField("providedInsets").set(params, array)
     }
+
 }

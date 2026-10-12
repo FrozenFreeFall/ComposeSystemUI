@@ -27,9 +27,6 @@ android {
         }
         buildTypes.getByName("debug").signingConfig = platform
         buildTypes.getByName("release").signingConfig = platform
-    } else {
-        // Build an unsigned artifact instead of pretending a debug key can join system UID.
-        buildTypes.getByName("debug").signingConfig = null
     }
     buildFeatures { compose = true }
 
@@ -38,11 +35,7 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
     kotlinOptions { jvmTarget = "17" }
-    buildTypes {
-        getByName("debug") {
-            signingConfig = signingConfigs.getByName("debug")
-        }
-    }
+
 }
 dependencies {
     implementation(platform("androidx.compose:compose-bom:2024.12.01"))

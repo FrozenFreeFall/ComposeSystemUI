@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.Intent
 import android.hardware.input.InputManager
 import android.net.wifi.WifiManager
+import android.content.pm.PackageManager
 import android.os.SystemClock
 import android.provider.Settings
 import android.view.InputDevice
@@ -18,6 +19,13 @@ import kotlinx.coroutines.withContext
 /** Privileged side effects. The Store remains independent of Android system services. */
 class SystemActionExecutor(private val context: Context) {
     suspend fun navigate(action: NavigationAction) = withContext(Dispatchers.IO) {
+        if (context.checkSelfPermission("android.permission.INJECT_EVENTS") != PackageManager.PERMISSION_GRANTED) {
+            if (action == NavigationAction.HOME) {
+                context.startActivity(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                return@withContext
+            }
+            error("普通应用演示不支持返回/最近任务，请使用设备系统导航键")
+        }
         val key = when (action) {
             NavigationAction.BACK -> KeyEvent.KEYCODE_BACK
             NavigationAction.HOME -> KeyEvent.KEYCODE_HOME

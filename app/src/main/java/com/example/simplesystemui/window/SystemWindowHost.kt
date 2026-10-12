@@ -1,5 +1,7 @@
 package com.example.simplesystemui.window
 
+import android.os.Build
+import android.provider.Settings
 import android.content.Context
 import android.graphics.Insets
 import android.graphics.PixelFormat
@@ -29,7 +31,7 @@ import kotlinx.coroutines.withTimeout
 
 enum class WindowKind { STATUS, NAVIGATION, SHADE }
 
-/** Three real WMS windows, no Activity token, Dialog or TYPE_APPLICATION_OVERLAY. Main-thread only. */
+/** Three application overlay windows owned by the foreground service. Main-thread only. */
 class SystemWindowHost(private val context: Context, private val store: SystemUiStore) {
     private data class Entry(
         val kind: WindowKind,
@@ -39,30 +41,32 @@ class SystemWindowHost(private val context: Context, private val store: SystemUi
         val params: WindowManager.LayoutParams,
         val owner: WindowLifecycleOwner,
         var backDispatcher: OnBackInvokedDispatcher? = null,
-        val backCallback: OnBackInvokedCallback,
+        val backCallback: OnBackInvokedCallback?,
     )
     private val entries = mutableListOf<Entry>()
     private var lastTarget: InputTarget? = null
 
     fun attach() {
         if (entries.isNotEmpty()) return
-        PlatformWindowApi.requireSystemEnvironment(context)
+        check(Settings.canDrawOverlays(context)) { "未授予悬浮窗权限" }
         try {
             add(WindowKind.STATUS, SystemWindowTypes.TYPE_STATUS_BAR)
             add(WindowKind.NAVIGATION, SystemWindowTypes.TYPE_NAVIGATION_BAR)
             add(WindowKind.SHADE, SystemWindowTypes.TYPE_NOTIFICATION_SHADE)
             render(store.state.value)
         } catch (error: Exception) {
+            error.printStackTrace()
             close() // Atomic rollback: never leave only one of the bars attached.
             throw IllegalStateException(
-                "系统窗口创建失败：检查 STATUS_BAR_SERVICE、平台 API 和原 SystemUI 的同类型窗口占用。${error.message}", error,
+                "悬浮窗创建失败：请检查悬浮窗权限及系统是否允许显示。${error.message}", error,
             )
         }
     }
 
     private fun add(kind: WindowKind, type: Int) {
         val display = requireNotNull(context.getSystemService(DisplayManager::class.java).getDisplay(Display.DEFAULT_DISPLAY))
-        val windowContext = context.createDisplayContext(display).createWindowContext(type, null)
+        val displayContext = context.createDisplayContext(display)
+        val windowContext = if (Build.VERSION.SDK_INT >= 30) displayContext.createWindowContext(type, null) else displayContext
         val themed = ContextThemeWrapper(windowContext, R.style.Theme_SimpleSystemUI)
         val wm = windowContext.getSystemService(WindowManager::class.java)
         val owner = WindowLifecycleOwner()
@@ -80,14 +84,16 @@ class SystemWindowHost(private val context: Context, private val store: SystemUi
         ).apply {
             gravity = if (kind == WindowKind.NAVIGATION) Gravity.BOTTOM else Gravity.TOP
             setTitle("SimpleSystemUI-${kind.name}")
-            setFitInsetsTypes(0)
-            layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
+            if (Build.VERSION.SDK_INT >= 30) {
+                setFitInsetsTypes(0)
+                layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
+            }
         }
-        if (kind == WindowKind.STATUS) {
-            PlatformWindowApi.provideBarInsets(params, WindowInsets.Type.statusBars(), Insets.of(0, height, 0, 0))
-        } else if (kind == WindowKind.NAVIGATION) {
-            PlatformWindowApi.provideBarInsets(params, WindowInsets.Type.navigationBars(), Insets.of(0, 0, 0, height))
-        }
+//        if (kind == WindowKind.STATUS) {
+//            PlatformWindowApi.provideBarInsets(params, WindowInsets.Type.statusBars(), Insets.of(0, height, 0, 0))
+//        } else if (kind == WindowKind.NAVIGATION) {
+//            PlatformWindowApi.provideBarInsets(params, WindowInsets.Type.navigationBars(), Insets.of(0, 0, 0, height))
+//        }
         val root = object : FrameLayout(themed) {
             override fun dispatchKeyEvent(event: KeyEvent): Boolean {
                 if (event.keyCode == KeyEvent.KEYCODE_BACK) {
@@ -116,12 +122,12 @@ class SystemWindowHost(private val context: Context, private val store: SystemUi
         try {
             wm.addView(root, params)
             val entry = Entry(kind, wm, root, compose, params, owner,
-                backCallback = OnBackInvokedCallback { store.dispatch(SystemUiIntent.BackPressed) })
+                backCallback = if (Build.VERSION.SDK_INT >= 33) OnBackInvokedCallback { store.dispatch(SystemUiIntent.BackPressed) } else null)
             entries += entry
             root.post {
-                if (entries.contains(entry) && root.isAttachedToWindow) {
+                if (Build.VERSION.SDK_INT >= 33 && entries.contains(entry) && root.isAttachedToWindow) {
                     entry.backDispatcher = root.findOnBackInvokedDispatcher()
-                    entry.backDispatcher?.registerOnBackInvokedCallback(OnBackInvokedDispatcher.PRIORITY_DEFAULT, entry.backCallback)
+                    entry.backDispatcher?.registerOnBackInvokedCallback(OnBackInvokedDispatcher.PRIORITY_DEFAULT, requireNotNull(entry.backCallback))
                 }
             }
             owner.visible(kind != WindowKind.SHADE)
@@ -168,7 +174,9 @@ class SystemWindowHost(private val context: Context, private val store: SystemUi
 
     fun close() {
         entries.asReversed().forEach {
-            it.backDispatcher?.unregisterOnBackInvokedCallback(it.backCallback)
+            if (Build.VERSION.SDK_INT >= 33) {
+                it.backCallback?.let { callback -> it.backDispatcher?.unregisterOnBackInvokedCallback(callback) }
+            }
             runCatching { it.wm.removeViewImmediate(it.root) }
             it.compose.disposeComposition()
             it.owner.destroy()
