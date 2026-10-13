@@ -2,7 +2,6 @@ package com.example.simplesystemui.ui
 
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -23,18 +22,20 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.example.simplesystemui.mvi.*
+import com.example.simplesystemui.BuildConfig
+import com.example.simplesystemui.InputTarget
+import com.example.simplesystemui.NavigationAction
+import com.example.simplesystemui.SettingsPage
+import com.example.simplesystemui.SystemUiController
 import com.example.simplesystemui.window.WindowKind
 
 @Composable
-fun SystemWindowContent(kind: WindowKind, store: SystemUiStore) {
-    val state by store.state.collectAsStateWithLifecycle()
-    SystemUiTheme(state.dark) {
+fun SystemWindowContent(kind: WindowKind, controller: SystemUiController) {
+    SystemUiTheme(controller.dark) {
         when (kind) {
-            WindowKind.STATUS -> StatusBar(state) { store.dispatch(it) }
-            WindowKind.NAVIGATION -> NavigationBar(state) { store.dispatch(it) }
-            WindowKind.SHADE -> NotificationShade(state) { store.dispatch(it) }
+            WindowKind.STATUS -> StatusBar(controller)
+            WindowKind.NAVIGATION -> NavigationBar(controller)
+            WindowKind.SHADE -> NotificationShade(controller)
         }
     }
 }
@@ -80,28 +81,28 @@ fun TvAction(
 }
 
 @Composable
-private fun StatusBar(state: SystemUiState, dispatch: (SystemUiIntent) -> Unit) {
+private fun StatusBar(controller: SystemUiController) {
     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
         Row(Modifier.fillMaxSize().padding(horizontal = 24.dp), verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(14.dp)) {
             Icon(Icons.Rounded.Tv, null, Modifier.size(20.dp), tint = MaterialTheme.colorScheme.primary)
             Text("SYSTEM UI", fontSize = 14.sp, fontWeight = FontWeight.Bold)
-            Text(state.device.date, fontSize = 12.sp)
+            Text(controller.device.date, fontSize = 12.sp)
             Spacer(Modifier.weight(1f))
-            Icon(if (state.device.wifiEnabled == true) Icons.Rounded.Wifi else Icons.Rounded.WifiOff,
+            Icon(if (controller.device.wifiEnabled == true) Icons.Rounded.Wifi else Icons.Rounded.WifiOff,
                 "Wi-Fi 开关状态", Modifier.size(18.dp))
-            Text(state.device.batteryPercent?.let { "$it%${if (state.device.charging) " · 充电" else ""}" } ?: "外接电源", fontSize = 12.sp)
-            Text(state.device.time, fontSize = 16.sp, fontWeight = FontWeight.Bold)
-            TvAction("快捷面板", Icons.Rounded.Tune, compact = true) { dispatch(SystemUiIntent.OpenShade) }
+            Text(controller.device.batteryPercent?.let { "$it%${if (controller.device.charging) " · 充电" else ""}" } ?: "外接电源", fontSize = 12.sp)
+            Text(controller.device.time, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+            TvAction("快捷面板", Icons.Rounded.Tune, compact = true) { controller.openShade() }
         }
     }
 }
 
 @Composable
-private fun NavigationBar(state: SystemUiState, dispatch: (SystemUiIntent) -> Unit) {
+private fun NavigationBar(controller: SystemUiController) {
     val focus = remember { FocusRequester() }
-    LaunchedEffect(state.inputTarget) {
-        if (state.inputTarget == InputTarget.NAVIGATION) {
+    LaunchedEffect(controller.inputTarget) {
+        if (controller.inputTarget == InputTarget.NAVIGATION) {
             withFrameNanos { }
             focus.requestFocus()
         }
@@ -109,29 +110,29 @@ private fun NavigationBar(state: SystemUiState, dispatch: (SystemUiIntent) -> Un
     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
         Row(Modifier.fillMaxSize().padding(horizontal = 24.dp), verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-            Text(if (state.inputTarget == InputTarget.NAVIGATION) "遥控器控制中" else "系统导航", fontSize = 12.sp)
+            Text(if (controller.inputTarget == InputTarget.NAVIGATION) "遥控器控制中" else "系统导航", fontSize = 12.sp)
             Spacer(Modifier.weight(1f))
             TvAction("返回", Icons.AutoMirrored.Rounded.ArrowBack, compact = true) {
-                dispatch(SystemUiIntent.Navigate(NavigationAction.BACK))
+                controller.navigate(NavigationAction.BACK)
             }
             TvAction("主页", Icons.Rounded.Home, Modifier.focusRequester(focus), compact = true) {
-                dispatch(SystemUiIntent.Navigate(NavigationAction.HOME))
+                controller.navigate(NavigationAction.HOME)
             }
             TvAction("最近任务", Icons.Rounded.RecentActors, compact = true) {
-                dispatch(SystemUiIntent.Navigate(NavigationAction.RECENTS))
+                controller.navigate(NavigationAction.RECENTS)
             }
-            TvAction("快捷面板", Icons.Rounded.Dashboard, compact = true) { dispatch(SystemUiIntent.OpenShade) }
-            TvAction("释放焦点", Icons.AutoMirrored.Rounded.KeyboardReturn, compact = true) { dispatch(SystemUiIntent.ReleaseFocus) }
+            TvAction("快捷面板", Icons.Rounded.Dashboard, compact = true) { controller.openShade() }
+            TvAction("释放焦点", Icons.AutoMirrored.Rounded.KeyboardReturn, compact = true) { controller.releaseFocus() }
             Spacer(Modifier.weight(1f))
         }
     }
 }
 
 @Composable
-private fun NotificationShade(state: SystemUiState, dispatch: (SystemUiIntent) -> Unit) {
+private fun NotificationShade(controller: SystemUiController) {
     val focus = remember { FocusRequester() }
-    LaunchedEffect(state.shadeVisible) {
-        if (state.shadeVisible) {
+    LaunchedEffect(controller.shadeVisible) {
+        if (controller.shadeVisible) {
             withFrameNanos { }
             focus.requestFocus()
         }
@@ -143,42 +144,42 @@ private fun NotificationShade(state: SystemUiState, dispatch: (SystemUiIntent) -
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
                         Text("快捷面板", fontSize = 28.sp, fontWeight = FontWeight.Bold)
-                        Text("${state.device.time}  ·  ${state.device.date}", fontSize = 14.sp)
+                        Text("${controller.device.time}  ·  ${controller.device.date}", fontSize = 14.sp)
                     }
-                    TvAction("关闭", Icons.Rounded.Close) { dispatch(SystemUiIntent.CloseShade) }
+                    TvAction("关闭", Icons.Rounded.Close) { controller.closeShade() }
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                     TvAction("Wi-Fi", Icons.Rounded.Wifi, Modifier.weight(1f).focusRequester(focus),
                         subtitle = when {
-                            state.wifiBusy -> "正在发送请求…"
-                            state.device.wifiEnabled == true -> "已开启 · 点击关闭"
-                            state.device.wifiEnabled == false -> "已关闭 · 点击开启"
+                            !BuildConfig.SYSTEM_UI -> "打开 Wi-Fi 设置"
+                            controller.device.wifiEnabled == true -> "已开启 · 点击关闭"
+                            controller.device.wifiEnabled == false -> "已关闭 · 点击开启"
                             else -> "设备不支持"
-                        }) { dispatch(SystemUiIntent.ToggleWifi) }
+                        }) { controller.toggleWifi() }
                     TvAction("蓝牙", Icons.Rounded.Bluetooth, Modifier.weight(1f), "打开设备蓝牙设置") {
-                        dispatch(SystemUiIntent.OpenSettings(SettingsPage.BLUETOOTH))
+                        controller.openSettings(SettingsPage.BLUETOOTH)
                     }
-                    TvAction("外观", Icons.Rounded.DarkMode, Modifier.weight(1f), if (state.dark) "深色 · 切换" else "浅色 · 切换") {
-                        dispatch(SystemUiIntent.ToggleTheme)
+                    TvAction("外观", Icons.Rounded.DarkMode, Modifier.weight(1f), if (controller.dark) "深色 · 切换" else "浅色 · 切换") {
+                        controller.toggleTheme()
                     }
                 }
                 Surface(color = MaterialTheme.colorScheme.surfaceVariant, shape = RoundedCornerShape(18.dp)) {
                     Column(Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Text("系统亮度  ${state.brightness * 100 / 255}%", fontWeight = FontWeight.Bold)
-                        LinearProgressIndicator(progress = { state.brightness / 255f }, modifier = Modifier.fillMaxWidth())
+                        Text("系统亮度  ${controller.brightness * 100 / 255}%", fontWeight = FontWeight.Bold)
+                        LinearProgressIndicator(progress = { controller.brightness / 255f }, modifier = Modifier.fillMaxWidth())
                         Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                            TvAction("降低", Icons.Rounded.Remove, Modifier.weight(1f)) { dispatch(SystemUiIntent.AdjustBrightness(-25)) }
-                            TvAction("提高", Icons.Rounded.Add, Modifier.weight(1f)) { dispatch(SystemUiIntent.AdjustBrightness(25)) }
-                            TvAction("显示设置", Icons.Rounded.Settings, Modifier.weight(1f)) { dispatch(SystemUiIntent.OpenSettings(SettingsPage.DISPLAY)) }
+                            TvAction("降低", Icons.Rounded.Remove, Modifier.weight(1f)) { controller.adjustBrightness(-25) }
+                            TvAction("提高", Icons.Rounded.Add, Modifier.weight(1f)) { controller.adjustBrightness(25) }
+                            TvAction("显示设置", Icons.Rounded.Settings, Modifier.weight(1f)) { controller.openSettings(SettingsPage.DISPLAY) }
                         }
                         Text("电视背光是否响应由厂商实现决定；调节时切换到手动亮度。", fontSize = 12.sp)
                     }
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                    TvAction("系统设置", Icons.Rounded.Settings, Modifier.weight(1f)) { dispatch(SystemUiIntent.OpenSettings(SettingsPage.ALL)) }
-                    TvAction("停止窗口服务", Icons.Rounded.PowerSettingsNew, Modifier.weight(1f)) { dispatch(SystemUiIntent.StopService) }
+                    TvAction("系统设置", Icons.Rounded.Settings, Modifier.weight(1f)) { controller.openSettings(SettingsPage.ALL) }
+                    TvAction("停止窗口服务", Icons.Rounded.PowerSettingsNew, Modifier.weight(1f)) { controller.stop() }
                 }
-                state.message?.let { Text(it, fontSize = 14.sp, color = MaterialTheme.colorScheme.primary) }
+                controller.message?.let { Text(it, fontSize = 14.sp, color = MaterialTheme.colorScheme.primary) }
                 Text("方向键移动 · 确认执行 · 返回关闭", fontSize = 12.sp)
             }
         }

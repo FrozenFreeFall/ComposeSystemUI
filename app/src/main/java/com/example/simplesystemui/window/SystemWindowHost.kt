@@ -1,7 +1,9 @@
 package com.example.simplesystemui.window
 
 import android.os.Build
-import android.provider.Settings
+import android.os.Handler
+import android.os.Looper
+import android.os.SystemClock
 import android.content.Context
 import android.graphics.Insets
 import android.graphics.PixelFormat
@@ -19,20 +21,19 @@ import android.window.OnBackInvokedDispatcher
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.platform.ViewCompositionStrategy
 import androidx.lifecycle.setViewTreeLifecycleOwner
-import androidx.lifecycle.setViewTreeViewModelStoreOwner
 import androidx.savedstate.setViewTreeSavedStateRegistryOwner
 import com.example.simplesystemui.R
-import com.example.simplesystemui.mvi.*
+import com.example.simplesystemui.BuildConfig
+import com.example.simplesystemui.InputTarget
+import com.example.simplesystemui.SystemUiController
 import com.example.simplesystemui.platform.PlatformWindowApi
 import com.example.simplesystemui.platform.SystemWindowTypes
 import com.example.simplesystemui.ui.SystemWindowContent
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.withTimeout
 
 enum class WindowKind { STATUS, NAVIGATION, SHADE }
 
-/** Three application overlay windows owned by the foreground service. Main-thread only. */
-class SystemWindowHost(private val context: Context, private val store: SystemUiStore) {
+/** Three WindowManager windows. All methods run on the main thread. */
+class SystemWindowHost(private val context: Context, private val controller: SystemUiController) {
     private data class Entry(
         val kind: WindowKind,
         val wm: WindowManager,
@@ -45,20 +46,24 @@ class SystemWindowHost(private val context: Context, private val store: SystemUi
     )
     private val entries = mutableListOf<Entry>()
     private var lastTarget: InputTarget? = null
+    private val handler = Handler(Looper.getMainLooper())
 
     fun attach() {
         if (entries.isNotEmpty()) return
-        check(Settings.canDrawOverlays(context)) { "未授予悬浮窗权限" }
         try {
             add(WindowKind.STATUS, SystemWindowTypes.TYPE_STATUS_BAR)
             add(WindowKind.NAVIGATION, SystemWindowTypes.TYPE_NAVIGATION_BAR)
             add(WindowKind.SHADE, SystemWindowTypes.TYPE_NOTIFICATION_SHADE)
-            render(store.state.value)
+            render()
         } catch (error: Exception) {
             error.printStackTrace()
             close() // Atomic rollback: never leave only one of the bars attached.
             throw IllegalStateException(
-                "悬浮窗创建失败：请检查悬浮窗权限及系统是否允许显示。${error.message}", error,
+                if (BuildConfig.SYSTEM_UI) {
+                    "系统窗口创建失败：请检查平台签名、系统权限，以及原有 SystemUI 是否已释放窗口。${error.message}"
+                } else {
+                    "悬浮窗创建失败：请检查悬浮窗权限及系统是否允许显示。${error.message}"
+                }, error,
             )
         }
     }
@@ -89,40 +94,41 @@ class SystemWindowHost(private val context: Context, private val store: SystemUi
                 layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
             }
         }
-//        if (kind == WindowKind.STATUS) {
-//            PlatformWindowApi.provideBarInsets(params, WindowInsets.Type.statusBars(), Insets.of(0, height, 0, 0))
-//        } else if (kind == WindowKind.NAVIGATION) {
-//            PlatformWindowApi.provideBarInsets(params, WindowInsets.Type.navigationBars(), Insets.of(0, 0, 0, height))
-//        }
+        if (BuildConfig.SYSTEM_UI && Build.VERSION.SDK_INT >= 36) {
+            if (kind == WindowKind.STATUS) {
+                PlatformWindowApi.provideBarInsets(params, WindowInsets.Type.statusBars(), Insets.of(0, height, 0, 0))
+            } else if (kind == WindowKind.NAVIGATION) {
+                PlatformWindowApi.provideBarInsets(params, WindowInsets.Type.navigationBars(), Insets.of(0, 0, 0, height))
+            }
+        }
         val root = object : FrameLayout(themed) {
             override fun dispatchKeyEvent(event: KeyEvent): Boolean {
                 if (event.keyCode == KeyEvent.KEYCODE_BACK) {
-                    if (event.action == KeyEvent.ACTION_UP && !event.isCanceled) store.dispatch(SystemUiIntent.BackPressed)
+                    if (event.action == KeyEvent.ACTION_UP && !event.isCanceled) controller.backPressed()
                     return true
                 }
                 if (event.keyCode == KeyEvent.KEYCODE_MENU) {
-                    if (event.action == KeyEvent.ACTION_UP) store.dispatch(
-                        if (store.state.value.shadeVisible) SystemUiIntent.CloseShade else SystemUiIntent.OpenShade,
-                    )
+                    if (event.action == KeyEvent.ACTION_UP && !event.isCanceled) {
+                        if (controller.shadeVisible) controller.closeShade() else controller.openShade()
+                    }
                     return true
                 }
                 return super.dispatchKeyEvent(event)
             }
         }
         root.setViewTreeLifecycleOwner(owner)
-        root.setViewTreeViewModelStoreOwner(owner)
         root.setViewTreeSavedStateRegistryOwner(owner)
         val compose = ComposeView(themed).apply {
             id = View.generateViewId()
             setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed)
-            setContent { SystemWindowContent(kind, store) }
+            setContent { SystemWindowContent(kind, controller) }
         }
         root.addView(compose, FrameLayout.LayoutParams(-1, -1))
         if (kind == WindowKind.SHADE) root.visibility = View.GONE
         try {
             wm.addView(root, params)
             val entry = Entry(kind, wm, root, compose, params, owner,
-                backCallback = if (Build.VERSION.SDK_INT >= 33) OnBackInvokedCallback { store.dispatch(SystemUiIntent.BackPressed) } else null)
+                backCallback = if (Build.VERSION.SDK_INT >= 33) OnBackInvokedCallback { controller.backPressed() } else null)
             entries += entry
             root.post {
                 if (Build.VERSION.SDK_INT >= 33 && entries.contains(entry) && root.isAttachedToWindow) {
@@ -138,22 +144,22 @@ class SystemWindowHost(private val context: Context, private val store: SystemUi
         }
     }
 
-    fun render(state: SystemUiState) {
-        if (lastTarget == state.inputTarget) return
+    fun render() {
+        if (lastTarget == controller.inputTarget) return
         // First release focus from all windows, then give it to exactly one target.
         entries.forEach { entry -> setFocusable(entry, false) }
         val shade = entries.firstOrNull { it.kind == WindowKind.SHADE }
         shade?.apply {
-            root.visibility = if (state.shadeVisible) View.VISIBLE else View.GONE
-            owner.visible(state.shadeVisible)
+            root.visibility = if (controller.shadeVisible) View.VISIBLE else View.GONE
+            owner.visible(controller.shadeVisible)
         }
-        val target = when (state.inputTarget) {
+        val target = when (controller.inputTarget) {
             InputTarget.APP -> null
             InputTarget.NAVIGATION -> entries.firstOrNull { it.kind == WindowKind.NAVIGATION }
             InputTarget.SHADE -> shade
         }
         target?.let { setFocusable(it, true) }
-        lastTarget = state.inputTarget
+        lastTarget = controller.inputTarget
     }
 
     private fun setFocusable(entry: Entry, focused: Boolean) {
@@ -166,13 +172,26 @@ class SystemWindowHost(private val context: Context, private val store: SystemUi
     }
 
     /** Wait for actual focus callbacks before injecting BACK, otherwise our bar could receive it. */
-    suspend fun awaitInputReleased() {
-        withTimeout(1_500) {
-            while (entries.any { it.root.hasWindowFocus() }) delay(16)
+    fun afterInputReleased(action: () -> Unit) {
+        handler.removeCallbacksAndMessages(null)
+        val deadline = SystemClock.uptimeMillis() + 1_500
+        val checkFocus = object : Runnable {
+            override fun run() {
+                if (entries.isEmpty() || controller.inputTarget != InputTarget.APP) return
+                if (entries.none { it.root.hasWindowFocus() }) {
+                    action()
+                } else if (SystemClock.uptimeMillis() < deadline) {
+                    handler.postDelayed(this, 16)
+                } else {
+                    controller.showMessage("窗口尚未释放按键焦点，请重试")
+                }
+            }
         }
+        handler.post(checkFocus)
     }
 
     fun close() {
+        handler.removeCallbacksAndMessages(null)
         entries.asReversed().forEach {
             if (Build.VERSION.SDK_INT >= 33) {
                 it.backCallback?.let { callback -> it.backDispatcher?.unregisterOnBackInvokedCallback(callback) }

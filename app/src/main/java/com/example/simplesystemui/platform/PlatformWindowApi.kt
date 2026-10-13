@@ -1,18 +1,12 @@
 package com.example.simplesystemui.platform
 
-import android.app.Activity
 import android.content.Context
-import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Insets
-import android.net.Uri
 import android.os.Binder
 import android.os.Process
-import android.provider.Settings
-import android.view.Gravity
-import android.view.LayoutInflater
 import android.view.WindowManager
-import com.example.simplesystemui.R
+import androidx.annotation.RequiresApi
 import java.lang.reflect.Array as ReflectArray
 
 /** All non-SDK window access is isolated here. Intended ONLY for platform-authorized system UID. */
@@ -27,6 +21,7 @@ object PlatformWindowApi {
     }
 
     /** Provide actual WMS insets, so apps which respect insets lay out around our bars. */
+    @RequiresApi(36)
     fun provideBarInsets(params: WindowManager.LayoutParams, insetsType: Int, size: Insets) {
         val clazz = Class.forName("android.view.InsetsFrameProvider")
         val provider = clazz.getConstructor(Any::class.java, Int::class.javaPrimitiveType, Int::class.javaPrimitiveType)

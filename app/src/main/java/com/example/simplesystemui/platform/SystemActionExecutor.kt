@@ -2,58 +2,63 @@ package com.example.simplesystemui.platform
 
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.hardware.input.InputManager
 import android.net.wifi.WifiManager
-import android.content.pm.PackageManager
 import android.os.SystemClock
 import android.provider.Settings
 import android.view.InputDevice
 import android.view.InputEvent
 import android.view.KeyCharacterMap
 import android.view.KeyEvent
-import com.example.simplesystemui.mvi.NavigationAction
-import com.example.simplesystemui.mvi.SettingsPage
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
+import com.example.simplesystemui.BuildConfig
+import com.example.simplesystemui.NavigationAction
+import com.example.simplesystemui.SettingsPage
 
-/** Privileged side effects. The Store remains independent of Android system services. */
+/** 普通应用只用公开 API，系统版本才执行需要系统权限的操作。 */
 class SystemActionExecutor(private val context: Context) {
-    suspend fun navigate(action: NavigationAction) = withContext(Dispatchers.IO) {
-        if (context.checkSelfPermission("android.permission.INJECT_EVENTS") != PackageManager.PERMISSION_GRANTED) {
+    fun navigate(action: NavigationAction) {
+        if (!BuildConfig.SYSTEM_UI) {
             if (action == NavigationAction.HOME) {
-                context.startActivity(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-                return@withContext
+                context.startActivity(Intent(Intent.ACTION_MAIN)
+                    .addCategory(Intent.CATEGORY_HOME).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                return
             }
             error("普通应用演示不支持返回/最近任务，请使用设备系统导航键")
+        }
+        check(context.checkSelfPermission("android.permission.INJECT_EVENTS") == PackageManager.PERMISSION_GRANTED) {
+            "未授予系统 INJECT_EVENTS 权限"
         }
         val key = when (action) {
             NavigationAction.BACK -> KeyEvent.KEYCODE_BACK
             NavigationAction.HOME -> KeyEvent.KEYCODE_HOME
             NavigationAction.RECENTS -> KeyEvent.KEYCODE_APP_SWITCH
         }
-        // @hide API: system UID + INJECT_EVENTS required; public SDK build uses an isolated bridge.
+        // injectInputEvent 是隐藏 API，只有系统版本会走到这里。
         val input = context.getSystemService(InputManager::class.java)
         val inject = InputManager::class.java.getMethod("injectInputEvent", InputEvent::class.java, Int::class.javaPrimitiveType)
         val downTime = SystemClock.uptimeMillis()
         fun event(actionCode: Int) = KeyEvent(downTime, SystemClock.uptimeMillis(), actionCode,
             key, 0, 0, KeyCharacterMap.VIRTUAL_KEYBOARD, 0, KeyEvent.FLAG_FROM_SYSTEM, InputDevice.SOURCE_KEYBOARD)
-        // 2 = INJECT_INPUT_EVENT_MODE_WAIT_FOR_FINISH. Never leave a key pressed after failure.
+        var down = false
         var up = false
-        val down = try {
-            inject.invoke(input, event(KeyEvent.ACTION_DOWN), 2) as Boolean
+        try {
+            // 0 = ASYNC，不在主线程等待目标应用处理按键。
+            down = inject.invoke(input, event(KeyEvent.ACTION_DOWN), 0) as Boolean
         } finally {
-            up = inject.invoke(input, event(KeyEvent.ACTION_UP), 2) as Boolean
+            up = inject.invoke(input, event(KeyEvent.ACTION_UP), 0) as Boolean
         }
         check(down && up) { "系统未接受导航按键：$action" }
     }
 
     @Suppress("DEPRECATION")
-    suspend fun setWifi(enabled: Boolean): Boolean = withContext(Dispatchers.IO) {
-        context.getSystemService(WifiManager::class.java)?.setWifiEnabled(enabled) ?: false
+    fun setWifi(enabled: Boolean): Boolean {
+        check(BuildConfig.SYSTEM_UI) { "普通应用请通过 Wi-Fi 设置页面切换" }
+        return context.getSystemService(WifiManager::class.java)?.setWifiEnabled(enabled) ?: false
     }
 
-    suspend fun setBrightness(value: Int) = withContext(Dispatchers.IO) {
-        check(Settings.System.canWrite(context)) { "未授予 WRITE_SETTINGS" }
+    fun setBrightness(value: Int) {
+        check(Settings.System.canWrite(context)) { "请先在控制台授权修改系统设置" }
         check(Settings.System.putInt(context.contentResolver, Settings.System.SCREEN_BRIGHTNESS_MODE,
             Settings.System.SCREEN_BRIGHTNESS_MODE_MANUAL)) { "无法切换手动亮度模式" }
         check(Settings.System.putInt(context.contentResolver, Settings.System.SCREEN_BRIGHTNESS, value.coerceIn(10, 255))) {
@@ -73,9 +78,9 @@ class SystemActionExecutor(private val context: Context) {
                 context.startActivity(Intent(action).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
                 return
             } catch (_: android.content.ActivityNotFoundException) {
-                // Some TV vendors only expose the top-level settings screen.
+                // 部分设备只提供设置首页。
             } catch (_: SecurityException) {
-                // Fall back to the top-level settings screen.
+                // 尝试设置首页。
             }
         }
         error("设备没有可用的设置页面")

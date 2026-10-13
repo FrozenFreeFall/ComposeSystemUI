@@ -9,24 +9,18 @@ import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.content.res.Configuration
 import android.os.Build
-import android.provider.Settings
 import android.os.IBinder
+import android.provider.Settings
 import android.util.Log
 import android.widget.Toast
-import com.example.simplesystemui.mvi.*
-import com.example.simplesystemui.platform.SystemActionExecutor
 import com.example.simplesystemui.platform.PlatformWindowApi
 import com.example.simplesystemui.window.SystemWindowHost
-import kotlinx.coroutines.*
 
-/** SystemUI entry point. Owns the lifetime of the MVI Store and all WMS windows. */
+/** Service 负责窗口、设备监听和通知的生命周期。 */
 class SystemUIService : Service() {
     private val app get() = application as SystemUIApplication
-    private val serviceJob = SupervisorJob()
-    private val scope = CoroutineScope(serviceJob + Dispatchers.Main.immediate + CoroutineExceptionHandler { _, error -> fail(error) })
-    private lateinit var store: SystemUiStore
+    private lateinit var controller: SystemUiController
     private lateinit var windows: SystemWindowHost
-    private lateinit var actions: SystemActionExecutor
     private var ready = false
     private var failure: String? = null
 
@@ -34,52 +28,25 @@ class SystemUIService : Service() {
         super.onCreate()
         try {
             startForegroundNotification()
-            check(Settings.canDrawOverlays(this)) { "请先在控制台授权悬浮窗" }
-            store = SystemUiStore(scope)
-            actions = SystemActionExecutor(this)
-            windows = SystemWindowHost(this, store)
-            windows.attach()
-            ready = true
-            app.reportStatus(ServiceStatus(true, "普通应用悬浮窗已显示：状态栏 / 导航栏 / 快捷面板"))
-            scope.launch { store.state.collect { windows.render(it) } }
-            scope.launch { app.deviceRepository.observe().collect { store.dispatch(SystemUiIntent.DeviceChanged(it)) } }
-            scope.launch {
-                store.effects.collect { effect ->
-                    try {
-                        // Commit focus/window changes before executing any platform action.
-                        windows.render(store.state.value)
-                        when (effect) {
-                            is SystemUiEffect.Navigate -> {
-                                windows.awaitInputReleased()
-                                actions.navigate(effect.action)
-                            }
-                            is SystemUiEffect.OpenSettings -> {
-                                windows.awaitInputReleased()
-                                actions.openSettings(effect.page)
-                            }
-                            is SystemUiEffect.SetWifi -> {
-                                val success = withTimeout(10_000) { actions.setWifi(effect.enabled) }
-                                store.dispatch(SystemUiIntent.WifiFinished(success))
-                            }
-                            is SystemUiEffect.SetBrightness -> actions.setBrightness(effect.value)
-                            SystemUiEffect.StopService -> stopSelf()
-                        }
-                    } catch (e: Exception) {
-                        if (e is CancellationException && e !is TimeoutCancellationException) throw e
-                        if (effect is SystemUiEffect.SetWifi) store.dispatch(SystemUiIntent.WifiFinished(false))
-                        if (effect is SystemUiEffect.SetBrightness) {
-                            val actual = android.provider.Settings.System.getInt(contentResolver,
-                                android.provider.Settings.System.SCREEN_BRIGHTNESS, 128)
-                            store.dispatch(SystemUiIntent.BrightnessChanged(actual))
-                        }
-                        val message = e.cause?.message ?: e.message ?: "系统操作失败"
-                        store.dispatch(SystemUiIntent.ReportMessage(message))
-                        Toast.makeText(this@SystemUIService, message, Toast.LENGTH_LONG).show()
-                        Log.e(TAG, "Effect failed: $effect", e)
-                    }
-                }
+            if (BuildConfig.SYSTEM_UI) {
+                PlatformWindowApi.requireSystemEnvironment(this)
+            } else {
+                check(Settings.canDrawOverlays(this)) { "请先在控制台授权悬浮窗" }
             }
-        } catch (e: Exception) { fail(e) }
+            controller = SystemUiController(this) { stopSelf() }
+            windows = SystemWindowHost(this, controller)
+            controller.onWindowsChanged = {
+                try { windows.render() } catch (error: Exception) { fail(error) }
+            }
+            controller.runAfterInputReleased = windows::afterInputReleased
+            windows.attach()
+            controller.start()
+            ready = true
+            val mode = if (BuildConfig.SYSTEM_UI) "系统原生 SystemUI 窗口" else "普通应用悬浮窗"
+            app.reportStatus(ServiceStatus(true, "$mode 已显示：状态栏 / 导航栏 / 快捷面板"))
+        } catch (error: Exception) {
+            fail(error)
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -89,11 +56,11 @@ class SystemUIService : Service() {
         }
         if (!ready) return START_NOT_STICKY
         when (intent?.action) {
-            ACTION_OPEN_SHADE -> store.dispatch(SystemUiIntent.OpenShade)
-            ACTION_FOCUS_NAVIGATION -> store.dispatch(SystemUiIntent.FocusNavigation)
-            ACTION_RELEASE_FOCUS -> store.dispatch(SystemUiIntent.ReleaseFocus)
+            ACTION_OPEN_SHADE -> controller.openShade()
+            ACTION_FOCUS_NAVIGATION -> controller.focusNavigation()
+            ACTION_RELEASE_FOCUS -> controller.releaseFocus()
         }
-        // Do not crash-loop if a vendor SystemUI later reclaims its singleton windows.
+        // 窗口被设备原有 SystemUI 占用时，不自动反复重启。
         return START_NOT_STICKY
     }
 
@@ -101,7 +68,7 @@ class SystemUIService : Service() {
 
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
-        if (ready) try { windows.recreate() } catch (e: Exception) { fail(e) }
+        if (ready) try { windows.recreate() } catch (error: Exception) { fail(error) }
     }
 
     private fun startForegroundNotification() {
@@ -125,6 +92,7 @@ class SystemUIService : Service() {
 
     private fun fail(error: Throwable) {
         if (failure != null) return
+        ready = false
         failure = error.message ?: error.javaClass.simpleName
         Log.e(TAG, "SystemUI startup/window failure", error)
         app.reportStatus(ServiceStatus(false, failure!!))
@@ -134,9 +102,8 @@ class SystemUIService : Service() {
 
     override fun onDestroy() {
         ready = false
-        serviceJob.cancel()
+        if (::controller.isInitialized) controller.close()
         if (::windows.isInitialized) windows.close()
-        if (::store.isInitialized) store.close()
         stopForeground(STOP_FOREGROUND_REMOVE)
         app.reportStatus(ServiceStatus(false, failure ?: "服务已停止，三个窗口已释放"))
         super.onDestroy()

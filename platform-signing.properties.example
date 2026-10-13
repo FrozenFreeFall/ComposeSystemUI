@@ -1,4 +1,6 @@
 # Copy to platform-signing.properties and use YOUR DEVICE'S platform keystore.
+# This certificate is used by systemDebug/systemRelease only.
+# Without this file the system APK is unsigned; demo always uses the debug key.
 # Use forward slashes for Windows paths. Never commit actual keys/passwords.
 storeFile=D:/android-keys/platform.jks
 storePassword=REPLACE_ME

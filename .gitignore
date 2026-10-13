@@ -1,9 +1,11 @@
 # Gradle files
 .gradle/
+.kotlin/
 build/
 
 # Local configuration file (sdk path, etc)
 local.properties
+platform-signing.properties
 
 # Log/OS Files
 *.log
