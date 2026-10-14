@@ -6,7 +6,7 @@ Kotlin + Compose 的简单 SystemUI 窗口 demo，同一份界面支持系统应
 `BroadcastReceiver` 和 `ContentObserver` 回调更新。
 
 
-![](.\doc\preview_test.gif)
+![](./doc/preview_test.gif)
 
 ## 两套构建
 
