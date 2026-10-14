@@ -5,6 +5,9 @@ Kotlin + Compose 的简单 SystemUI 窗口 demo，同一份界面支持系统应
 `SystemUiController` 的方法，Compose 用 `mutableStateOf` 更新界面；设备状态用
 `BroadcastReceiver` 和 `ContentObserver` 回调更新。
 
+
+![](.\doc\preview_test.gif)
+
 ## 两套构建
 
 在 Android Studio 的 **Build Variants** 中选择 `demoDebug` 或 `systemDebug`。
@@ -115,6 +118,7 @@ Compose。关闭面板会清空预览并忽略旧请求结果；停止服务会�
 
 系统版通过 Android 16 的 ActivityTaskManager 隐藏接口读取、恢复、移除任务，
 需要平台签名、系统 UID 及 system Manifest 中声明的任务管理和截图权限。
+接口以 [Android 16 AOSP 任务服务](https://github.com/aosp-mirror/platform_frameworks_base/blob/android16-release/services/core/java/com/android/server/wm/ActivityTaskManagerService.java) 为准。
 普通版不读取其它应用任务，不调用这些隐藏接口；启用全局导航服务后打开设备的
 原生最近任务，由设备系统负责卡片、切换和移除。
 
