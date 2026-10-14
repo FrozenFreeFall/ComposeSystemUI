@@ -35,7 +35,8 @@ fun SystemWindowContent(kind: WindowKind, controller: SystemUiController, shadeS
         when (kind) {
             WindowKind.STATUS -> StatusBar(controller)
             WindowKind.NAVIGATION -> NavigationBar(controller)
-            WindowKind.SHADE -> NotificationShade(controller, shadeScrollState)
+            WindowKind.SHADE -> if (controller.recentsVisible) RecentsPanel(controller)
+                else NotificationShade(controller, shadeScrollState)
         }
     }
 }

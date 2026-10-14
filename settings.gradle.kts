@@ -7,3 +7,4 @@ dependencyResolutionManagement {
 }
 rootProject.name = "SimpleSystemUI"
 include(":app")
+include(":hidden-api-stubs")

@@ -61,6 +61,7 @@ class SystemUIService : Service() {
         if (!ready) return START_NOT_STICKY
         when (intent?.action) {
             ACTION_OPEN_SHADE -> controller.openShade()
+            ACTION_OPEN_RECENTS -> controller.openRecents()
             ACTION_FOCUS_NAVIGATION -> controller.focusNavigation()
             ACTION_RELEASE_FOCUS -> controller.releaseFocus()
         }
@@ -120,6 +121,7 @@ class SystemUIService : Service() {
         const val ACTION_START = "com.example.simplesystemui.START"
         const val ACTION_STOP = "com.example.simplesystemui.STOP"
         const val ACTION_OPEN_SHADE = "com.example.simplesystemui.OPEN_SHADE"
+        const val ACTION_OPEN_RECENTS = "com.example.simplesystemui.OPEN_RECENTS"
         const val ACTION_FOCUS_NAVIGATION = "com.example.simplesystemui.FOCUS_NAVIGATION"
         const val ACTION_RELEASE_FOCUS = "com.example.simplesystemui.RELEASE_FOCUS"
     }

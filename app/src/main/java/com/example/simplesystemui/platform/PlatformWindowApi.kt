@@ -15,7 +15,11 @@ object PlatformWindowApi {
         check(Process.myUid() % 100000 == Process.SYSTEM_UID) {
             "需要 android.uid.system，当前 uid=${Process.myUid()}；请使用设备平台签名并正确部署。"
         }
-        listOf("android.permission.STATUS_BAR_SERVICE", "android.permission.INTERNAL_SYSTEM_WINDOW").forEach {
+        listOf(
+            "android.permission.STATUS_BAR_SERVICE",
+            "android.permission.INTERNAL_SYSTEM_WINDOW",
+            "android.permission.MONITOR_INPUT",
+        ).forEach {
             check(context.checkSelfPermission(it) == PackageManager.PERMISSION_GRANTED) { "缺少系统权限：$it" }
         }
     }

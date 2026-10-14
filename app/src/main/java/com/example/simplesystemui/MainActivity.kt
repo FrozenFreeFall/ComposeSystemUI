@@ -54,7 +54,7 @@ class MainActivity : ComponentActivity() {
         app.reportStatus(ServiceStatus(false, "请在系统设置中允许本应用显示悬浮窗"))
     }
 
-    private fun requestGlobalBackPermission() {
+    private fun requestGlobalNavigationPermission() {
         for (intent in listOf(
             Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS),
             Intent(Settings.ACTION_SETTINGS),
@@ -63,7 +63,7 @@ class MainActivity : ComponentActivity() {
             catch (_: android.content.ActivityNotFoundException) {}
             catch (_: SecurityException) {}
         }
-        app.reportStatus(ServiceStatus(false, "请在系统无障碍设置中启用全局返回服务"))
+        app.reportStatus(ServiceStatus(false, "请在系统无障碍设置中启用全局导航服务"))
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -83,9 +83,9 @@ class MainActivity : ComponentActivity() {
                         if (!BuildConfig.SYSTEM_UI) {
                             Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                                 TvAction("授权悬浮窗", Icons.Rounded.Settings) { requestOverlayPermission() }
-                                TvAction("启用全局返回", Icons.AutoMirrored.Rounded.ArrowBack) { requestGlobalBackPermission() }
+                                TvAction("启用全局导航", Icons.AutoMirrored.Rounded.ArrowBack) { requestGlobalNavigationPermission() }
                             }
-                            Text("全局返回服务：${if (BackAccessibilityService.connected) "已开启" else "未开启"}。该服务仅执行返回，不读取屏幕内容。", fontSize = 14.sp)
+                            Text("全局导航服务：${if (BackAccessibilityService.connected) "已开启" else "未开启"}。用于返回和最近任务，不读取屏幕内容。", fontSize = 14.sp)
                         }
                         Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                             TvAction("显示窗口", Icons.Rounded.PlayArrow, Modifier.focusRequester(focus)) { command(SystemUIService.ACTION_START) }
@@ -95,13 +95,14 @@ class MainActivity : ComponentActivity() {
                         Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                             TvAction("打开快捷面板", Icons.Rounded.Dashboard) { command(SystemUIService.ACTION_OPEN_SHADE) }
                             TvAction("控制导航栏", Icons.Rounded.Gamepad) { command(SystemUIService.ACTION_FOCUS_NAVIGATION) }
+                            TvAction("最近任务", Icons.Rounded.RecentActors) { command(SystemUIService.ACTION_OPEN_RECENTS) }
                         }
                         if (BuildConfig.SYSTEM_UI) {
                             Text("演示步骤：以平台签名的系统应用安装 → 显示窗口 → 关闭控制台。状态栏、导航栏和快捷面板由服务管理，停止服务即可移除。", fontSize = 16.sp)
                             Text("使用 TYPE_STATUS_BAR、TYPE_NAVIGATION_BAR 和 TYPE_NOTIFICATION_SHADE。请在定制系统中运行，窗口权限和返回/最近任务依赖平台授权。", fontSize = 14.sp)
                         } else {
                             Text("演示步骤：授权悬浮窗 → 返回此页 → 显示窗口 → 关闭控制台。状态栏、导航栏和快捷面板由前台服务显示，停止服务即可移除。", fontSize = 16.sp)
-                            Text("普通应用使用 TYPE_APPLICATION_OVERLAY 演示，不会替换系统栏。Wi-Fi 按钮打开设置，返回需要启用全局返回服务，最近任务需要系统权限；亮度调整需要允许修改系统设置。", fontSize = 14.sp)
+                            Text("普通应用使用 TYPE_APPLICATION_OVERLAY 演示，不会替换系统栏。Wi-Fi 按钮打开设置；返回和原生最近任务需要启用全局导航服务；亮度调整需要允许修改系统设置。", fontSize = 14.sp)
                             TvAction("授权修改系统设置", Icons.Rounded.BrightnessMedium) {
                                 try { startActivity(Intent(Settings.ACTION_MANAGE_WRITE_SETTINGS, Uri.parse("package:$packageName"))) }
                                 catch (_: android.content.ActivityNotFoundException) { app.reportStatus(ServiceStatus(false, "请在系统设置中允许修改系统设置")) }

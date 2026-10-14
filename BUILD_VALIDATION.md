@@ -79,3 +79,28 @@ ROM 的平台密钥和 SystemUI 集成环境。
 - 回归验证状态栏下拉仍可打开面板。截图保存在 `app/build/gesture-validation/`
   的 `up-panel.png`、`up-dragging.png`。
 - 两版构建与 lint 通过，系统版原生窗口仍需 Android 16 目标 ROM 验证。
+
+## InputMonitor 系统全局返回验证（2026-10-14）
+
+系统版新增真实 `InputMonitor` / `InputEventReceiver` 输入通道。按下时只观察，
+左侧单指向右横滑超过 touchSlop 后才 `pilferPointers()`；56dp 松手提交返回。
+每个事件在 finally 中确认处理完成，返回动作在确认之后执行。停止或重建时按
+receiver → monitor 顺序释放。普通版保留原来的窄输入窗，两版共用识别逻辑。
+
+- `hidden-api-stubs` 仅通过 `systemCompileOnly` 引用；普通版没有隐藏输入类型依赖。
+  `MONITOR_INPUT` 仅在系统 Manifest 声明，启动时检查授权。
+- 工作区同时有最近任务代码更新：首次构建遇到该部分缺类，重试时编译通过，但
+  并行打包出现 APK ZIP 条目冲突。没有删除或回退这些改动。
+- 最终将当前全部源码复制到 `app/build/input-monitor-validation/project/` 独立构建，
+  两版 `assemble` / `lint` 退出码 0。JDK 21，Java/Kotlin 目标 17，SDK 36，离线、
+  `--no-daemon` 和 `-Pkotlin.compiler.execution.strategy=in-process`，沿用 pipe 回退参数。
+  普通版 lint：0 errors、15 warnings；系统版：0 errors、30 warnings。
+- 解析最终两 APK 的 DEX 类定义、类型和方法引用，并检查合并 Manifest，12 项全部通过：
+  两 APK 均不包含三个隐藏框架类；普通版没有这些类型引用；系统版有真实 receiver 子类，
+  以及 `getInputChannel`、`pilferPointers`、`finishInputEvent`、`dispose` 引用。
+  结果保存在 `app/build/input-monitor-validation/apk-report.json`。
+- Android 15 模拟器安装最终普通版 APK，验证原窄输入窗、拖动箭头、取消隐藏、短滑、
+  回拉、纵滑不返回，长横滑关闭快捷面板且不再次返回底层 Activity。状态栏下拉和
+  面板上滑回归通过。测试结束停止窗口服务，未修改权限设置；脚本、截图位于上述验证目录。
+- `git diff --check` 通过。未在本次模拟器执行系统版输入监视器；模拟器为 API 35，
+  系统版仍需 API 36 目标 ROM、匹配的平台签名、系统 UID 和系统权限验证。

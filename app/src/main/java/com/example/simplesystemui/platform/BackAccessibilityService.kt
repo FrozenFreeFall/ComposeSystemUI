@@ -9,7 +9,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 
-/** 普通版由用户手动启用，仅执行返回，不监听事件或读取窗口内容。 */
+/** 普通版由用户手动启用，仅执行返回和最近任务，不监听事件或读取窗口内容。 */
 class BackAccessibilityService : AccessibilityService() {
     override fun onServiceConnected() {
         super.onServiceConnected()
@@ -51,6 +51,9 @@ class BackAccessibilityService : AccessibilityService() {
 
         fun performBack(): Boolean =
             serviceInstance?.performGlobalAction(GLOBAL_ACTION_BACK) == true
+
+        fun performRecents(): Boolean =
+            serviceInstance?.performGlobalAction(GLOBAL_ACTION_RECENTS) == true
 
         private fun notifyConnectionChanged() {
             if (Looper.myLooper() == Looper.getMainLooper()) {

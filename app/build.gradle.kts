@@ -61,6 +61,8 @@ android {
 
 }
 dependencies {
+    // Compile signatures only: the system flavor uses the real platform classes at runtime.
+    add("systemCompileOnly", project(":hidden-api-stubs"))
     implementation(platform("androidx.compose:compose-bom:2024.12.01"))
     implementation("androidx.core:core-ktx:1.15.0")
     implementation("androidx.activity:activity-compose:1.9.3")

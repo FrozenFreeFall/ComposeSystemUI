@@ -18,6 +18,7 @@ Kotlin + Compose 的简单 SystemUI 窗口 demo，同一份界面支持系统应
 | 身份 / 权限 | 普通 UID，用户授权悬浮窗 | `android.uid.system`，系统签名权限 |
 | 签名 | 调试签名 | 设备平台签名；未配置时生成未签名 APK |
 | Insets | 普通悬浮窗 | 状态栏、导航栏向 WMS 提供 Insets |
+| 左侧返回输入 | 24dp 悬浮输入窗 | `InputMonitor` 全局触摸监视器 |
 
 共用的应用、启动 Activity 和前台服务声明放在 `app/src/main/AndroidManifest.xml`。
 构建时自动合并对应 flavor 的 Manifest，`BuildConfig.SYSTEM_UI` 自动选择代码路径，
@@ -37,8 +38,8 @@ Kotlin + Compose 的简单 SystemUI 窗口 demo，同一份界面支持系统应
 
 1. 安装 `demoDebug` APK，打开控制台。
 2. 点击“授权悬浮窗”，在系统设置允许显示在其它应用上层，再返回控制台。
-3. 要使用跨应用返回，点击“启用全局返回”，在无障碍设置开启“Simple SystemUI 全局返回”。
-   服务仅执行返回，不监听事件、不读取屏幕内容。
+3. 要使用跨应用返回和最近任务，点击“启用全局导航”，在无障碍设置开启
+   “Simple SystemUI 全局导航”。服务仅执行全局操作，不监听事件、不读取屏幕内容。
 4. 点击“显示窗口”，可打开快捷面板、控制导航栏或关闭控制台查看跨应用显示。
 5. 在控制台或服务通知点击“停止”移除全部窗口。
 
@@ -51,7 +52,7 @@ Kotlin + Compose 的简单 SystemUI 窗口 demo，同一份界面支持系统应
 手势从本应用状态栏开始，普通版的悬浮窗不会接管原生系统栏手势。
 
 普通版不会替换设备系统栏，也不会改变其它应用的系统栏 Insets。
-主页按钮打开桌面；返回按钮使用全局返回服务，最近任务仍使用设备系统导航键。
+主页按钮打开桌面；返回和最近任务按钮使用全局导航服务。普通版打开设备原生最近任务。
 Wi-Fi 按钮打开系统 Wi-Fi 设置，亮度调整需要“授权修改系统设置”。
 部分 TV ROM 不提供悬浮窗授权入口或不允许悬浮窗，需设备本身支持。
 
@@ -59,9 +60,16 @@ Wi-Fi 按钮打开系统 Wi-Fi 设置，亮度调整需要“授权修改系统�
 
 从屏幕物理左边缘向右拖动，会显示跟随手指的深色气泡和白色返回箭头。
 超过 56dp 松手执行一次返回，短滑、回拉、多指或手势取消均不返回。
-返回触发时提供轻触反馈。输入区域固定为左侧 24dp，避开状态栏和导航栏。
+返回触发时提供轻触反馈。手势起点限定在左侧 24dp，避开状态栏和导航栏。
 快捷面板打开时先关闭面板；导航栏控制中先释放焦点；其余情况下返回前台应用。
 
+系统版通过 `InputManager.monitorGestureInput()` 创建 `InputMonitor`，由
+`InputEventReceiver` 接收默认显示器的全局触摸。按下时只观察，确认向右横滑后
+调用 `pilferPointers()` 接管当前触摸，再显示返回图标；其它触摸继续由原窗口处理。
+每个输入事件都调用 `finishInputEvent()`，抬手事件确认完成后才执行返回。
+关闭窗口服务或重建窗口时先释放 receiver，再释放 monitor。
+
+普通版保留原来的 24dp 输入窗和独立图标窗，不创建系统输入监视器。
 普通版未开启返回服务时不会占用前台应用的边缘触摸区域；系统版沿用
 `INJECT_EVENTS` 注入返回按键。普通版通过
 [Android 无障碍全局操作](https://developer.android.com/reference/android/accessibilityservice/AccessibilityService#performGlobalAction(int))
@@ -78,7 +86,7 @@ Wi-Fi 按钮打开系统 Wi-Fi 设置，亮度调整需要“授权修改系统�
    填入目标设备的平台 keystore 信息。实际签名配置已加入 `.gitignore`。
 2. 选择 `systemDebug` 构建，按目标 ROM 的系统应用流程部署。
 3. 确认应用获得系统 UID、`STATUS_BAR_SERVICE`、`INTERNAL_SYSTEM_WINDOW`、
-   `INJECT_EVENTS` 权限，再通过控制台启动窗口服务。
+   `INJECT_EVENTS`、`MONITOR_INPUT` 权限，再通过控制台启动窗口服务。
 
 系统版不申请悬浮窗权限。系统 UID 需要与目标 ROM 匹配的平台证书，仅把 APK
 放入系统目录不够。未配置密钥时可以编译，但未签名 APK 不能直接安装。
@@ -89,17 +97,43 @@ Wi-Fi 按钮打开系统 Wi-Fi 设置，亮度调整需要“授权修改系统�
 参见 [AOSP Android 16 DisplayPolicy](https://github.com/aosp-mirror/platform_frameworks_base/blob/android16-release/services/core/java/com/android/server/wm/DisplayPolicy.java)。
 窗口 type 与 Insets 桥接以 Android 16 为准，厂商 ROM 的隐藏 API 可能需要适配。
 
+`InputMonitor`、`InputChannel`、`InputEventReceiver` 不在公开 SDK 中。
+`hidden-api-stubs` 模块只提供编译签名，通过 `systemCompileOnly` 引用；其类不会
+打包进 APK，系统版运行时使用 ROM 的真实实现。普通版不依赖这些隐藏类型。
+系统权限不足或 API 不可用时，系统版启动会报错，不切换到普通版输入窗。
+
+## 最近任务
+
+系统版点击导航栏或控制台的“最近任务”，在现有面板窗口显示任务卡片，与快捷面板互斥。
+卡片显示应用名称、图标和系统保存的画面；没有可用截图时显示“暂无预览”。
+点击卡片切回原任务，上滑超过 72dp 或点击“移除”删除该任务；支持方向键选择、
+确认打开，以及返回/关闭面板。刷新按钮重新读取任务列表。
+
+任务列表、图标、截图加载以及切换/移除请求在单独的工作线程执行，结果回到主线程更新
+Compose。关闭面板会清空预览并忽略旧请求结果；停止服务会关闭工作线程。
+切回任务前先隐藏面板、释放按键焦点。列表不显示桌面、最近任务界面及本应用控制台。
+
+系统版通过 Android 16 的 ActivityTaskManager 隐藏接口读取、恢复、移除任务，
+需要平台签名、系统 UID 及 system Manifest 中声明的任务管理和截图权限。
+普通版不读取其它应用任务，不调用这些隐藏接口；启用全局导航服务后打开设备的
+原生最近任务，由设备系统负责卡片、切换和移除。
+
 ## 主要代码
 
 - `MainActivity.kt`：启动/停止服务和权限入口。
 - `SystemUIService.kt`：前台通知、窗口与回调的创建/清理。
 - `SystemUiController.kt`：按钮直接调用的简单方法和 Compose 状态。
 - `data/DeviceRepository.kt`：时间、电量、Wi-Fi、亮度的系统回调。
+- `data/RecentTasksRepository.kt`：最近任务列表、图标、截图与系统任务操作。
+- `ui/RecentsPanel.kt`：最近任务卡片、上滑移除、遥控器操作及加载/错误状态。
 - `window/SystemWindowHost.kt`：`addView`、显示/隐藏面板、切换按键焦点。
 - `window/VerticalSwipeHandler.kt`：状态栏下拉、面板上滑识别、滑动距离与松手速度。
-- `window/EdgeBackWindow.kt`：固定宽度左边缘输入窗、返回判定和图标窗口。
+- `window/EdgeBackWindow.kt`：按构建版本选择输入来源，并管理返回图标窗口。
+- `window/EdgeBackGesture.kt`：共用的左侧返回手势识别、距离判断和取消逻辑。
+- `src/system/.../window/SystemGestureInput.kt`：系统全局监听、触摸接管和输入资源释放。
+- `src/demo/.../window/SystemGestureInput.kt`：普通版占位实现，防止误调用系统输入监听。
 - `window/EdgeBackIndicatorView.kt`：跟随手指的返回气泡与箭头。
-- `platform/BackAccessibilityService.kt`：普通版的全局返回接口。
+- `platform/BackAccessibilityService.kt`：普通版的全局返回和原生最近任务接口。
 - `platform/SystemWindowTypes.kt`：两种窗口 type。
 - `platform/PlatformWindowApi.kt`：系统版 Insets 隐藏 API 桥接。
 

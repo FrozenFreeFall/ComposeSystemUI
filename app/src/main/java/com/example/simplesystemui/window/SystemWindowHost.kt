@@ -124,7 +124,7 @@ class SystemWindowHost(private val context: Context, private val controller: Sys
         val swipe = when (kind) {
             WindowKind.STATUS -> VerticalSwipeHandler(
                 themed, SwipeDirection.DOWN,
-                canStart = { !controller.shadeVisible && entries.any { it.kind == WindowKind.SHADE } },
+                canStart = { !controller.panelVisible && entries.any { it.kind == WindowKind.SHADE } },
                 onStart = ::startShadeDrag,
                 onDrag = { distance -> updateShadeHeight(dragStartHeight + distance) },
                 onEnd = ::finishShadeDrag,
@@ -176,6 +176,12 @@ class SystemWindowHost(private val context: Context, private val controller: Sys
                     }
                     return true
                 }
+                if (event.keyCode == KeyEvent.KEYCODE_APP_SWITCH) {
+                    if (event.action == KeyEvent.ACTION_UP && !event.isCanceled) {
+                        if (controller.recentsVisible) controller.closeRecents() else controller.openRecents()
+                    }
+                    return true
+                }
                 return super.dispatchKeyEvent(event)
             }
         }
@@ -224,14 +230,15 @@ class SystemWindowHost(private val context: Context, private val controller: Sys
         shade?.apply {
             setTouchable(this, true)
             root.clipBounds = null
-            shadeHeight = if (controller.shadeVisible) maxShadeHeight(this) else 0f
-            root.visibility = if (controller.shadeVisible) View.VISIBLE else View.GONE
-            owner.visible(controller.shadeVisible)
+            shadeHeight = if (controller.panelVisible) maxShadeHeight(this) else 0f
+            root.visibility = if (controller.panelVisible) View.VISIBLE else View.GONE
+            owner.visible(controller.panelVisible)
         }
         val target = when (controller.inputTarget) {
             InputTarget.APP -> null
             InputTarget.NAVIGATION -> entries.firstOrNull { it.kind == WindowKind.NAVIGATION }
             InputTarget.SHADE -> shade
+            InputTarget.RECENTS -> shade
         }
         target?.let { setFocusable(it, true) }
         edgeBack.setEnabled(BuildConfig.SYSTEM_UI || BackAccessibilityService.connected ||

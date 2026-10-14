@@ -21,12 +21,15 @@ class SystemActionExecutor(private val context: Context) {
         if (!BuildConfig.SYSTEM_UI) {
             when (action) {
                 NavigationAction.BACK -> {
-                    check(BackAccessibilityService.connected) { "请在控制台启用全局返回服务" }
+                    check(BackAccessibilityService.connected) { "请在控制台启用全局导航服务" }
                     check(BackAccessibilityService.performBack()) { "系统未接受返回操作" }
                 }
                 NavigationAction.HOME -> context.startActivity(Intent(Intent.ACTION_MAIN)
                     .addCategory(Intent.CATEGORY_HOME).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-                NavigationAction.RECENTS -> error("普通应用演示不支持最近任务，请使用设备系统导航键")
+                NavigationAction.RECENTS -> {
+                    check(BackAccessibilityService.connected) { "请在控制台启用全局导航服务" }
+                    check(BackAccessibilityService.performRecents()) { "系统未接受最近任务操作" }
+                }
             }
             return
         }
@@ -36,7 +39,7 @@ class SystemActionExecutor(private val context: Context) {
         val key = when (action) {
             NavigationAction.BACK -> KeyEvent.KEYCODE_BACK
             NavigationAction.HOME -> KeyEvent.KEYCODE_HOME
-            NavigationAction.RECENTS -> KeyEvent.KEYCODE_APP_SWITCH
+            NavigationAction.RECENTS -> error("系统版最近任务由任务面板处理")
         }
         // injectInputEvent 是隐藏 API，只有系统版本会走到这里。
         val input = context.getSystemService(InputManager::class.java)
