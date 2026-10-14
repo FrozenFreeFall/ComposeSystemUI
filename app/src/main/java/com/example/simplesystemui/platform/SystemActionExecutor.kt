@@ -19,12 +19,16 @@ import com.example.simplesystemui.SettingsPage
 class SystemActionExecutor(private val context: Context) {
     fun navigate(action: NavigationAction) {
         if (!BuildConfig.SYSTEM_UI) {
-            if (action == NavigationAction.HOME) {
-                context.startActivity(Intent(Intent.ACTION_MAIN)
+            when (action) {
+                NavigationAction.BACK -> {
+                    check(BackAccessibilityService.connected) { "请在控制台启用全局返回服务" }
+                    check(BackAccessibilityService.performBack()) { "系统未接受返回操作" }
+                }
+                NavigationAction.HOME -> context.startActivity(Intent(Intent.ACTION_MAIN)
                     .addCategory(Intent.CATEGORY_HOME).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-                return
+                NavigationAction.RECENTS -> error("普通应用演示不支持最近任务，请使用设备系统导航键")
             }
-            error("普通应用演示不支持返回/最近任务，请使用设备系统导航键")
+            return
         }
         check(context.checkSelfPermission("android.permission.INJECT_EVENTS") == PackageManager.PERMISSION_GRANTED) {
             "未授予系统 INJECT_EVENTS 权限"

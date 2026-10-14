@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -30,6 +31,7 @@ import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import com.example.simplesystemui.ui.SystemUiTheme
 import com.example.simplesystemui.ui.TvAction
+import com.example.simplesystemui.platform.BackAccessibilityService
 
 /** 演示控制台。窗口由 Service 管理，关闭此 Activity 后仍然显示。 */
 class MainActivity : ComponentActivity() {
@@ -51,6 +53,19 @@ class MainActivity : ComponentActivity() {
         }
         app.reportStatus(ServiceStatus(false, "请在系统设置中允许本应用显示悬浮窗"))
     }
+
+    private fun requestGlobalBackPermission() {
+        for (intent in listOf(
+            Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS),
+            Intent(Settings.ACTION_SETTINGS),
+        )) {
+            try { startActivity(intent); return }
+            catch (_: android.content.ActivityNotFoundException) {}
+            catch (_: SecurityException) {}
+        }
+        app.reportStatus(ServiceStatus(false, "请在系统无障碍设置中启用全局返回服务"))
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
@@ -66,7 +81,11 @@ class MainActivity : ComponentActivity() {
                         Text(if (BuildConfig.SYSTEM_UI) "系统应用版 · 原生 SystemUI 窗口" else
                             "普通应用版 · 悬浮窗权限：${if (overlayAllowed) "已授权" else "未授权"}", fontSize = 16.sp)
                         if (!BuildConfig.SYSTEM_UI) {
-                            TvAction("授权悬浮窗", Icons.Rounded.Settings) { requestOverlayPermission() }
+                            Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                                TvAction("授权悬浮窗", Icons.Rounded.Settings) { requestOverlayPermission() }
+                                TvAction("启用全局返回", Icons.AutoMirrored.Rounded.ArrowBack) { requestGlobalBackPermission() }
+                            }
+                            Text("全局返回服务：${if (BackAccessibilityService.connected) "已开启" else "未开启"}。该服务仅执行返回，不读取屏幕内容。", fontSize = 14.sp)
                         }
                         Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                             TvAction("显示窗口", Icons.Rounded.PlayArrow, Modifier.focusRequester(focus)) { command(SystemUIService.ACTION_START) }
@@ -82,7 +101,7 @@ class MainActivity : ComponentActivity() {
                             Text("使用 TYPE_STATUS_BAR、TYPE_NAVIGATION_BAR 和 TYPE_NOTIFICATION_SHADE。请在定制系统中运行，窗口权限和返回/最近任务依赖平台授权。", fontSize = 14.sp)
                         } else {
                             Text("演示步骤：授权悬浮窗 → 返回此页 → 显示窗口 → 关闭控制台。状态栏、导航栏和快捷面板由前台服务显示，停止服务即可移除。", fontSize = 16.sp)
-                            Text("普通应用使用 TYPE_APPLICATION_OVERLAY 演示，不会替换系统栏。Wi-Fi 按钮打开设置，返回/最近任务需要系统权限；亮度调整需要允许修改系统设置。", fontSize = 14.sp)
+                            Text("普通应用使用 TYPE_APPLICATION_OVERLAY 演示，不会替换系统栏。Wi-Fi 按钮打开设置，返回需要启用全局返回服务，最近任务需要系统权限；亮度调整需要允许修改系统设置。", fontSize = 14.sp)
                             TvAction("授权修改系统设置", Icons.Rounded.BrightnessMedium) {
                                 try { startActivity(Intent(Settings.ACTION_MANAGE_WRITE_SETTINGS, Uri.parse("package:$packageName"))) }
                                 catch (_: android.content.ActivityNotFoundException) { app.reportStatus(ServiceStatus(false, "请在系统设置中允许修改系统设置")) }

@@ -13,7 +13,7 @@ Kotlin + Compose 的简单 SystemUI 窗口 demo，同一份界面支持系统应
 | --- | --- | --- |
 | 包名 | `com.example.simplesystemui.demo` | `com.example.simplesystemui` |
 | 最低版本 | Android 8 / API 26 | Android 16 / API 36 |
-| 窗口 type | 三个窗口都用 `TYPE_APPLICATION_OVERLAY` (2038) | 状态栏 2000、导航栏 2019、通知面板 2040 |
+| 窗口 type | 全部使用 `TYPE_APPLICATION_OVERLAY` (2038) | 状态栏 2000、导航栏 2019、通知面板 2040、左侧返回窗口 2024 |
 | Manifest | `app/src/demo/AndroidManifest.xml` | `app/src/system/AndroidManifest.xml` |
 | 身份 / 权限 | 普通 UID，用户授权悬浮窗 | `android.uid.system`，系统签名权限 |
 | 签名 | 调试签名 | 设备平台签名；未配置时生成未签名 APK |
@@ -37,8 +37,10 @@ Kotlin + Compose 的简单 SystemUI 窗口 demo，同一份界面支持系统应
 
 1. 安装 `demoDebug` APK，打开控制台。
 2. 点击“授权悬浮窗”，在系统设置允许显示在其它应用上层，再返回控制台。
-3. 点击“显示窗口”，可打开快捷面板、控制导航栏或关闭控制台查看跨应用显示。
-4. 在控制台或服务通知点击“停止”移除全部窗口。
+3. 要使用跨应用返回，点击“启用全局返回”，在无障碍设置开启“Simple SystemUI 全局返回”。
+   服务仅执行返回，不监听事件、不读取屏幕内容。
+4. 点击“显示窗口”，可打开快捷面板、控制导航栏或关闭控制台查看跨应用显示。
+5. 在控制台或服务通知点击“停止”移除全部窗口。
 
 从本应用状态栏向下拖动可拉出快捷面板，面板展开高度跟随手指。
 松手时快速下滑会展开、快速上滑会收起；慢速拖动以展开一半为界。
@@ -49,9 +51,26 @@ Kotlin + Compose 的简单 SystemUI 窗口 demo，同一份界面支持系统应
 手势从本应用状态栏开始，普通版的悬浮窗不会接管原生系统栏手势。
 
 普通版不会替换设备系统栏，也不会改变其它应用的系统栏 Insets。
-主页按钮打开桌面；返回和最近任务按钮提示使用设备系统导航键。
+主页按钮打开桌面；返回按钮使用全局返回服务，最近任务仍使用设备系统导航键。
 Wi-Fi 按钮打开系统 Wi-Fi 设置，亮度调整需要“授权修改系统设置”。
 部分 TV ROM 不提供悬浮窗授权入口或不允许悬浮窗，需设备本身支持。
+
+## 左侧手势返回
+
+从屏幕物理左边缘向右拖动，会显示跟随手指的深色气泡和白色返回箭头。
+超过 56dp 松手执行一次返回，短滑、回拉、多指或手势取消均不返回。
+返回触发时提供轻触反馈。输入区域固定为左侧 24dp，避开状态栏和导航栏。
+快捷面板打开时先关闭面板；导航栏控制中先释放焦点；其余情况下返回前台应用。
+
+普通版未开启返回服务时不会占用前台应用的边缘触摸区域；系统版沿用
+`INJECT_EVENTS` 注入返回按键。普通版通过
+[Android 无障碍全局操作](https://developer.android.com/reference/android/accessibilityservice/AccessibilityService#performGlobalAction(int))
+执行返回，不需要读取窗口内容或注入触摸手势。
+
+普通版建议用设备的三键导航验证。设备原生边缘返回仍开启时，系统可能接管
+同一手势；收到取消事件时本应用会取消返回。Android 普通窗口的手势排除区域
+[每侧最多 200dp](https://codelabs.developers.google.com/codelabs/gesture-navigation)。
+系统 ROM 集成时需要统一管理原有 SystemUI 的边缘返回逻辑。
 
 ## 系统应用演示
 
@@ -78,6 +97,9 @@ Wi-Fi 按钮打开系统 Wi-Fi 设置，亮度调整需要“授权修改系统�
 - `data/DeviceRepository.kt`：时间、电量、Wi-Fi、亮度的系统回调。
 - `window/SystemWindowHost.kt`：`addView`、显示/隐藏面板、切换按键焦点。
 - `window/VerticalSwipeHandler.kt`：状态栏下拉、面板上滑识别、滑动距离与松手速度。
+- `window/EdgeBackWindow.kt`：固定宽度左边缘输入窗、返回判定和图标窗口。
+- `window/EdgeBackIndicatorView.kt`：跟随手指的返回气泡与箭头。
+- `platform/BackAccessibilityService.kt`：普通版的全局返回接口。
 - `platform/SystemWindowTypes.kt`：两种窗口 type。
 - `platform/PlatformWindowApi.kt`：系统版 Insets 隐藏 API 桥接。
 

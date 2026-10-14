@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="back_accessibility_service_label">Simple SystemUI 全局返回</string>
+    <string name="back_accessibility_service_description">为左侧边缘手势执行全局返回。该服务仅执行返回，不读取屏幕内容。</string>
+</resources>

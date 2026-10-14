@@ -14,6 +14,7 @@ import android.provider.Settings
 import android.util.Log
 import android.widget.Toast
 import com.example.simplesystemui.platform.PlatformWindowApi
+import com.example.simplesystemui.platform.BackAccessibilityService
 import com.example.simplesystemui.window.SystemWindowHost
 
 /** Service 负责窗口、设备监听和通知的生命周期。 */
@@ -39,6 +40,9 @@ class SystemUIService : Service() {
                 try { windows.render() } catch (error: Exception) { fail(error) }
             }
             controller.runAfterInputReleased = windows::afterInputReleased
+            BackAccessibilityService.onConnectionChanged = {
+                if (ready) controller.onWindowsChanged()
+            }
             windows.attach()
             controller.start()
             ready = true
@@ -102,6 +106,7 @@ class SystemUIService : Service() {
 
     override fun onDestroy() {
         ready = false
+        BackAccessibilityService.onConnectionChanged = null
         if (::controller.isInitialized) controller.close()
         if (::windows.isInitialized) windows.close()
         stopForeground(STOP_FOREGROUND_REMOVE)

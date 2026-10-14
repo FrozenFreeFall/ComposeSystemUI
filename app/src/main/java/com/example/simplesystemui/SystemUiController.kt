@@ -68,6 +68,10 @@ class SystemUiController(private val context: Context, private val stopService: 
         if (shadeVisible) closeShade() else releaseFocus()
     }
 
+    fun edgeBack() {
+        if (inputTarget == InputTarget.APP) navigate(NavigationAction.BACK) else backPressed()
+    }
+
     fun navigate(action: NavigationAction) {
         afterReleasingInput { actions.navigate(action) }
     }

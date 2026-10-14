@@ -36,12 +36,13 @@ import com.example.simplesystemui.BuildConfig
 import com.example.simplesystemui.InputTarget
 import com.example.simplesystemui.SystemUiController
 import com.example.simplesystemui.platform.PlatformWindowApi
+import com.example.simplesystemui.platform.BackAccessibilityService
 import com.example.simplesystemui.platform.SystemWindowTypes
 import com.example.simplesystemui.ui.SystemWindowContent
 
 enum class WindowKind { STATUS, NAVIGATION, SHADE }
 
-/** Three WindowManager windows. All methods run on the main thread. */
+/** System bars, notification shade and left-edge back windows. All methods run on the main thread. */
 class SystemWindowHost(private val context: Context, private val controller: SystemUiController) {
     private data class Entry(
         val kind: WindowKind,
@@ -55,6 +56,7 @@ class SystemWindowHost(private val context: Context, private val controller: Sys
     )
     private val entries = mutableListOf<Entry>()
     private val handler = Handler(Looper.getMainLooper())
+    private val edgeBack = EdgeBackWindow(context, controller::edgeBack)
     private var statusBarSwipe: VerticalSwipeHandler? = null
     private var shadeSwipe: VerticalSwipeHandler? = null
     private val shadeScrollState = ScrollState(0)
@@ -70,6 +72,7 @@ class SystemWindowHost(private val context: Context, private val controller: Sys
             add(WindowKind.STATUS, SystemWindowTypes.TYPE_STATUS_BAR)
             add(WindowKind.NAVIGATION, SystemWindowTypes.TYPE_NAVIGATION_BAR)
             add(WindowKind.SHADE, SystemWindowTypes.TYPE_NOTIFICATION_SHADE)
+            edgeBack.attach()
             render()
         } catch (error: Exception) {
             error.printStackTrace()
@@ -210,6 +213,7 @@ class SystemWindowHost(private val context: Context, private val controller: Sys
     }
 
     fun render() {
+        edgeBack.reset()
         statusBarSwipe?.reset()
         shadeSwipe?.reset()
         cancelShadeAnimation()
@@ -230,6 +234,8 @@ class SystemWindowHost(private val context: Context, private val controller: Sys
             InputTarget.SHADE -> shade
         }
         target?.let { setFocusable(it, true) }
+        edgeBack.setEnabled(BuildConfig.SYSTEM_UI || BackAccessibilityService.connected ||
+            controller.inputTarget != InputTarget.APP)
     }
 
     private fun startShadeDrag() {
@@ -342,6 +348,7 @@ class SystemWindowHost(private val context: Context, private val controller: Sys
     }
 
     fun close() {
+        edgeBack.close()
         statusBarSwipe?.reset()
         statusBarSwipe = null
         shadeSwipe?.reset()
