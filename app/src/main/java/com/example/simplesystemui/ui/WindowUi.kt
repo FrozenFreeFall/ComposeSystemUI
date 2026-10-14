@@ -2,8 +2,8 @@ package com.example.simplesystemui.ui
 
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -30,12 +30,12 @@ import com.example.simplesystemui.SystemUiController
 import com.example.simplesystemui.window.WindowKind
 
 @Composable
-fun SystemWindowContent(kind: WindowKind, controller: SystemUiController) {
+fun SystemWindowContent(kind: WindowKind, controller: SystemUiController, shadeScrollState: ScrollState) {
     SystemUiTheme(controller.dark) {
         when (kind) {
             WindowKind.STATUS -> StatusBar(controller)
             WindowKind.NAVIGATION -> NavigationBar(controller)
-            WindowKind.SHADE -> NotificationShade(controller)
+            WindowKind.SHADE -> NotificationShade(controller, shadeScrollState)
         }
     }
 }
@@ -129,7 +129,7 @@ private fun NavigationBar(controller: SystemUiController) {
 }
 
 @Composable
-private fun NotificationShade(controller: SystemUiController) {
+private fun NotificationShade(controller: SystemUiController, scrollState: ScrollState) {
     val focus = remember { FocusRequester() }
     LaunchedEffect(controller.shadeVisible) {
         if (controller.shadeVisible) {
@@ -138,49 +138,55 @@ private fun NotificationShade(controller: SystemUiController) {
         }
     }
     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-        Box(Modifier.fillMaxSize().padding(top = 40.dp, bottom = 64.dp), contentAlignment = Alignment.TopCenter) {
-            Column(Modifier.widthIn(max = 900.dp).fillMaxWidth().verticalScroll(rememberScrollState()).padding(24.dp),
-                verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text("快捷面板", fontSize = 28.sp, fontWeight = FontWeight.Bold)
-                        Text("${controller.device.time}  ·  ${controller.device.date}", fontSize = 14.sp)
-                    }
-                    TvAction("关闭", Icons.Rounded.Close) { controller.closeShade() }
-                }
-                Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                    TvAction("Wi-Fi", Icons.Rounded.Wifi, Modifier.weight(1f).focusRequester(focus),
-                        subtitle = when {
-                            !BuildConfig.SYSTEM_UI -> "打开 Wi-Fi 设置"
-                            controller.device.wifiEnabled == true -> "已开启 · 点击关闭"
-                            controller.device.wifiEnabled == false -> "已关闭 · 点击开启"
-                            else -> "设备不支持"
-                        }) { controller.toggleWifi() }
-                    TvAction("蓝牙", Icons.Rounded.Bluetooth, Modifier.weight(1f), "打开设备蓝牙设置") {
-                        controller.openSettings(SettingsPage.BLUETOOTH)
-                    }
-                    TvAction("外观", Icons.Rounded.DarkMode, Modifier.weight(1f), if (controller.dark) "深色 · 切换" else "浅色 · 切换") {
-                        controller.toggleTheme()
-                    }
-                }
-                Surface(color = MaterialTheme.colorScheme.surfaceVariant, shape = RoundedCornerShape(18.dp)) {
-                    Column(Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Text("系统亮度  ${controller.brightness * 100 / 255}%", fontWeight = FontWeight.Bold)
-                        LinearProgressIndicator(progress = { controller.brightness / 255f }, modifier = Modifier.fillMaxWidth())
-                        Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                            TvAction("降低", Icons.Rounded.Remove, Modifier.weight(1f)) { controller.adjustBrightness(-25) }
-                            TvAction("提高", Icons.Rounded.Add, Modifier.weight(1f)) { controller.adjustBrightness(25) }
-                            TvAction("显示设置", Icons.Rounded.Settings, Modifier.weight(1f)) { controller.openSettings(SettingsPage.DISPLAY) }
+        Box(Modifier.fillMaxSize()) {
+            Box(Modifier.fillMaxSize().padding(top = 40.dp, bottom = 112.dp), contentAlignment = Alignment.TopCenter) {
+                Column(Modifier.widthIn(max = 900.dp).fillMaxWidth().verticalScroll(scrollState).padding(24.dp),
+                    verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text("快捷面板", fontSize = 28.sp, fontWeight = FontWeight.Bold)
+                            Text("${controller.device.time}  ·  ${controller.device.date}", fontSize = 14.sp)
                         }
-                        Text("电视背光是否响应由厂商实现决定；调节时切换到手动亮度。", fontSize = 12.sp)
+                        TvAction("关闭", Icons.Rounded.Close) { controller.closeShade() }
                     }
+                    Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                        TvAction("Wi-Fi", Icons.Rounded.Wifi, Modifier.weight(1f).focusRequester(focus),
+                            subtitle = when {
+                                !BuildConfig.SYSTEM_UI -> "打开 Wi-Fi 设置"
+                                controller.device.wifiEnabled == true -> "已开启 · 点击关闭"
+                                controller.device.wifiEnabled == false -> "已关闭 · 点击开启"
+                                else -> "设备不支持"
+                            }) { controller.toggleWifi() }
+                        TvAction("蓝牙", Icons.Rounded.Bluetooth, Modifier.weight(1f), "打开设备蓝牙设置") {
+                            controller.openSettings(SettingsPage.BLUETOOTH)
+                        }
+                        TvAction("外观", Icons.Rounded.DarkMode, Modifier.weight(1f), if (controller.dark) "深色 · 切换" else "浅色 · 切换") {
+                            controller.toggleTheme()
+                        }
+                    }
+                    Surface(color = MaterialTheme.colorScheme.surfaceVariant, shape = RoundedCornerShape(18.dp)) {
+                        Column(Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Text("系统亮度  ${controller.brightness * 100 / 255}%", fontWeight = FontWeight.Bold)
+                            LinearProgressIndicator(progress = { controller.brightness / 255f }, modifier = Modifier.fillMaxWidth())
+                            Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                                TvAction("降低", Icons.Rounded.Remove, Modifier.weight(1f)) { controller.adjustBrightness(-25) }
+                                TvAction("提高", Icons.Rounded.Add, Modifier.weight(1f)) { controller.adjustBrightness(25) }
+                                TvAction("显示设置", Icons.Rounded.Settings, Modifier.weight(1f)) { controller.openSettings(SettingsPage.DISPLAY) }
+                            }
+                            Text("电视背光是否响应由厂商实现决定；调节时切换到手动亮度。", fontSize = 12.sp)
+                        }
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                        TvAction("系统设置", Icons.Rounded.Settings, Modifier.weight(1f)) { controller.openSettings(SettingsPage.ALL) }
+                        TvAction("停止窗口服务", Icons.Rounded.PowerSettingsNew, Modifier.weight(1f)) { controller.stop() }
+                    }
+                    controller.message?.let { Text(it, fontSize = 14.sp, color = MaterialTheme.colorScheme.primary) }
+                    Text("方向键移动 · 确认执行 · 返回关闭", fontSize = 12.sp)
                 }
-                Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                    TvAction("系统设置", Icons.Rounded.Settings, Modifier.weight(1f)) { controller.openSettings(SettingsPage.ALL) }
-                    TvAction("停止窗口服务", Icons.Rounded.PowerSettingsNew, Modifier.weight(1f)) { controller.stop() }
-                }
-                controller.message?.let { Text(it, fontSize = 14.sp, color = MaterialTheme.colorScheme.primary) }
-                Text("方向键移动 · 确认执行 · 返回关闭", fontSize = 12.sp)
+            }
+            Box(Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(bottom = 64.dp).height(48.dp),
+                contentAlignment = Alignment.Center) {
+                Text("上滑收起", fontSize = 12.sp)
             }
         }
     }

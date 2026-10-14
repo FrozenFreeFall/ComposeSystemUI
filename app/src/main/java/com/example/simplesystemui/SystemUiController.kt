@@ -111,8 +111,8 @@ class SystemUiController(private val context: Context, private val stopService: 
     }
 
     private fun changeTarget(target: InputTarget) {
-        if (inputTarget == target) return
         inputTarget = target
+        // Also cancel a window's drag preview when releasing an already-released target.
         onWindowsChanged()
     }
 

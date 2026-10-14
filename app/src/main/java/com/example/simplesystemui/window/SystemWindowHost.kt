@@ -1,5 +1,9 @@
 package com.example.simplesystemui.window
 
+import android.animation.Animator
+import android.animation.AnimatorListenerAdapter
+import android.animation.ValueAnimator
+import android.annotation.SuppressLint
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
@@ -7,17 +11,22 @@ import android.os.SystemClock
 import android.content.Context
 import android.graphics.Insets
 import android.graphics.PixelFormat
+import android.graphics.Rect
 import android.hardware.display.DisplayManager
 import android.view.ContextThemeWrapper
 import android.view.Display
 import android.view.Gravity
 import android.view.KeyEvent
+import android.view.MotionEvent
 import android.view.View
+import android.view.ViewConfiguration
 import android.view.WindowInsets
 import android.view.WindowManager
 import android.widget.FrameLayout
+import android.view.animation.DecelerateInterpolator
 import android.window.OnBackInvokedCallback
 import android.window.OnBackInvokedDispatcher
+import androidx.compose.foundation.ScrollState
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.platform.ViewCompositionStrategy
 import androidx.lifecycle.setViewTreeLifecycleOwner
@@ -45,8 +54,15 @@ class SystemWindowHost(private val context: Context, private val controller: Sys
         val backCallback: OnBackInvokedCallback?,
     )
     private val entries = mutableListOf<Entry>()
-    private var lastTarget: InputTarget? = null
     private val handler = Handler(Looper.getMainLooper())
+    private var statusBarSwipe: VerticalSwipeHandler? = null
+    private var shadeSwipe: VerticalSwipeHandler? = null
+    private val shadeScrollState = ScrollState(0)
+    private var shadeAnimator: ValueAnimator? = null
+    private var shadePreview = false
+    private var shadeHeight = 0f
+    private var dragStartHeight = 0f
+    private var dragStartedExpanded = false
 
     fun attach() {
         if (entries.isNotEmpty()) return
@@ -101,7 +117,51 @@ class SystemWindowHost(private val context: Context, private val controller: Sys
                 PlatformWindowApi.provideBarInsets(params, WindowInsets.Type.navigationBars(), Insets.of(0, 0, 0, height))
             }
         }
+        var shadeSwipeAllowed = false
+        val swipe = when (kind) {
+            WindowKind.STATUS -> VerticalSwipeHandler(
+                themed, SwipeDirection.DOWN,
+                canStart = { !controller.shadeVisible && entries.any { it.kind == WindowKind.SHADE } },
+                onStart = ::startShadeDrag,
+                onDrag = { distance -> updateShadeHeight(dragStartHeight + distance) },
+                onEnd = ::finishShadeDrag,
+            ).also { statusBarSwipe = it }
+            WindowKind.SHADE -> VerticalSwipeHandler(
+                themed, SwipeDirection.UP,
+                canStart = { controller.shadeVisible && shadeSwipeAllowed },
+                onStart = ::startShadeDrag,
+                onDrag = { distance -> updateShadeHeight(dragStartHeight + distance) },
+                onEnd = ::finishShadeDrag,
+            ).also { shadeSwipe = it }
+            WindowKind.NAVIGATION -> null
+        }
         val root = object : FrameLayout(themed) {
+            override fun dispatchTouchEvent(event: MotionEvent): Boolean {
+                if (kind == WindowKind.SHADE && event.actionMasked == MotionEvent.ACTION_DOWN) {
+                    // Choose scrolling or closing once per gesture. A later gesture can close
+                    // after content reaches its end; areas outside the scrolling column always can.
+                    val scrollWidth = this.width.coerceAtMost(dp(themed, 900))
+                    val sideMargin = (this.width - scrollWidth) / 2f
+                    shadeSwipeAllowed = shadePreview || !shadeScrollState.canScrollForward ||
+                        event.y < dp(themed, 40) || event.y >= this.height - dp(themed, 112) ||
+                        event.x < sideMargin || event.x >= this.width - sideMargin
+                }
+                return super.dispatchTouchEvent(event)
+            }
+
+            override fun onInterceptTouchEvent(event: MotionEvent): Boolean {
+                val intercepted = swipe?.intercept(event) == true
+                return intercepted || (kind == WindowKind.SHADE && shadePreview) ||
+                    super.onInterceptTouchEvent(event)
+            }
+
+            // This container only handles dragging; Compose buttons provide accessible actions.
+            @SuppressLint("ClickableViewAccessibility")
+            override fun onTouchEvent(event: MotionEvent): Boolean {
+                return swipe?.touch(event) == true || (kind == WindowKind.SHADE && shadePreview) ||
+                    super.onTouchEvent(event)
+            }
+
             override fun dispatchKeyEvent(event: KeyEvent): Boolean {
                 if (event.keyCode == KeyEvent.KEYCODE_BACK) {
                     if (event.action == KeyEvent.ACTION_UP && !event.isCanceled) controller.backPressed()
@@ -121,9 +181,14 @@ class SystemWindowHost(private val context: Context, private val controller: Sys
         val compose = ComposeView(themed).apply {
             id = View.generateViewId()
             setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed)
-            setContent { SystemWindowContent(kind, controller) }
+            setContent { SystemWindowContent(kind, controller, shadeScrollState) }
         }
         root.addView(compose, FrameLayout.LayoutParams(-1, -1))
+        if (kind == WindowKind.SHADE) {
+            root.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
+                if (shadePreview) updateShadeHeight(shadeHeight)
+            }
+        }
         if (kind == WindowKind.SHADE) root.visibility = View.GONE
         try {
             wm.addView(root, params)
@@ -145,11 +210,17 @@ class SystemWindowHost(private val context: Context, private val controller: Sys
     }
 
     fun render() {
-        if (lastTarget == controller.inputTarget) return
+        statusBarSwipe?.reset()
+        shadeSwipe?.reset()
+        cancelShadeAnimation()
+        shadePreview = false
         // First release focus from all windows, then give it to exactly one target.
         entries.forEach { entry -> setFocusable(entry, false) }
         val shade = entries.firstOrNull { it.kind == WindowKind.SHADE }
         shade?.apply {
+            setTouchable(this, true)
+            root.clipBounds = null
+            shadeHeight = if (controller.shadeVisible) maxShadeHeight(this) else 0f
             root.visibility = if (controller.shadeVisible) View.VISIBLE else View.GONE
             owner.visible(controller.shadeVisible)
         }
@@ -159,7 +230,87 @@ class SystemWindowHost(private val context: Context, private val controller: Sys
             InputTarget.SHADE -> shade
         }
         target?.let { setFocusable(it, true) }
-        lastTarget = controller.inputTarget
+    }
+
+    private fun startShadeDrag() {
+        val shade = entries.firstOrNull { it.kind == WindowKind.SHADE } ?: return
+        cancelShadeAnimation()
+        dragStartHeight = shadeHeight
+        dragStartedExpanded = controller.shadeVisible
+        shadePreview = true
+        // Opening stays with the status bar. Closing stays with the already-focused shade.
+        if (!dragStartedExpanded) {
+            setFocusable(shade, false)
+            setTouchable(shade, false)
+        }
+        updateShadeHeight(shadeHeight)
+        shade.root.visibility = View.VISIBLE
+        shade.owner.visible(true)
+    }
+
+    private fun updateShadeHeight(height: Float) {
+        val shade = entries.firstOrNull { it.kind == WindowKind.SHADE } ?: return
+        shadeHeight = height.coerceIn(0f, maxShadeHeight(shade))
+        val width = shade.root.width.takeIf { it > 0 } ?: shade.root.resources.displayMetrics.widthPixels
+        // Keep the Compose layout stable and reveal it from the top as the finger moves.
+        shade.root.clipBounds = Rect(0, 0, width, shadeHeight.toInt())
+    }
+
+    private fun finishShadeDrag(cancelled: Boolean, velocityY: Float) {
+        val shade = entries.firstOrNull { it.kind == WindowKind.SHADE } ?: return
+        if (!shadePreview) return
+        val maxHeight = maxShadeHeight(shade)
+        val minVelocity = ViewConfiguration.get(shade.root.context).scaledMinimumFlingVelocity
+        val expand = when {
+            cancelled -> dragStartedExpanded
+            velocityY > minVelocity -> true
+            velocityY < -minVelocity -> false
+            else -> shadeHeight >= maxHeight / 2f
+        }
+        val target = if (expand) maxHeight else 0f
+        val animator = ValueAnimator.ofFloat(shadeHeight, target)
+        shadeAnimator = animator
+        animator.duration = 220
+        animator.interpolator = DecelerateInterpolator()
+        animator.addUpdateListener { updateShadeHeight(it.animatedValue as Float) }
+        animator.addListener(object : AnimatorListenerAdapter() {
+            override fun onAnimationEnd(animation: Animator) {
+                if (shadeAnimator !== animation) return
+                shadeAnimator = null
+                when {
+                    expand == controller.shadeVisible -> render()
+                    expand -> controller.openShade()
+                    else -> controller.closeShade()
+                }
+            }
+        })
+        animator.start()
+    }
+
+    private fun maxShadeHeight(shade: Entry): Float {
+        return when {
+            shade.root.height > 0 -> shade.root.height.toFloat()
+            Build.VERSION.SDK_INT >= 30 -> shade.wm.currentWindowMetrics.bounds.height().toFloat()
+            else -> shade.root.resources.displayMetrics.heightPixels.toFloat()
+        }
+    }
+
+    private fun cancelShadeAnimation() {
+        shadeAnimator?.apply {
+            removeAllListeners()
+            removeAllUpdateListeners()
+            cancel()
+        }
+        shadeAnimator = null
+    }
+
+    private fun setTouchable(entry: Entry, touchable: Boolean) {
+        val mask = WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+        val newFlags = if (touchable) entry.params.flags and mask.inv() else entry.params.flags or mask
+        if (entry.params.flags != newFlags) {
+            entry.params.flags = newFlags
+            entry.wm.updateViewLayout(entry.root, entry.params)
+        }
     }
 
     private fun setFocusable(entry: Entry, focused: Boolean) {
@@ -191,6 +342,13 @@ class SystemWindowHost(private val context: Context, private val controller: Sys
     }
 
     fun close() {
+        statusBarSwipe?.reset()
+        statusBarSwipe = null
+        shadeSwipe?.reset()
+        shadeSwipe = null
+        cancelShadeAnimation()
+        shadePreview = false
+        shadeHeight = 0f
         handler.removeCallbacksAndMessages(null)
         entries.asReversed().forEach {
             if (Build.VERSION.SDK_INT >= 33) {
@@ -201,7 +359,6 @@ class SystemWindowHost(private val context: Context, private val controller: Sys
             it.owner.destroy()
         }
         entries.clear()
-        lastTarget = null
     }
 
     fun recreate() {
