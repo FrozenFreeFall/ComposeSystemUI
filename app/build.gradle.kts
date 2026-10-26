@@ -12,8 +12,8 @@ android {
         applicationId = "com.example.simplesystemui"
         minSdk = 26
         targetSdk = 36
-        versionCode = 2
-        versionName = "2.0"
+        versionCode = 20000
+        versionName = "2.0.0"
     }
     // Only the system flavor may use the device's platform certificate.
     val platformFile = rootProject.file("platform-signing.properties")
