@@ -79,6 +79,7 @@ class SystemActionExecutor(private val context: Context) {
             SettingsPage.BLUETOOTH -> Settings.ACTION_BLUETOOTH_SETTINGS
             SettingsPage.DISPLAY -> Settings.ACTION_DISPLAY_SETTINGS
             SettingsPage.ALL -> Settings.ACTION_SETTINGS
+            SettingsPage.NOTIFICATIONS -> Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS
         }
         for (action in listOf(requested, Settings.ACTION_SETTINGS).distinct()) {
             try {

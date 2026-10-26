@@ -1,5 +1,41 @@
 # 简化版构建与验证
 
+## 最小通知模块验证（2026-10-26）
+
+- 两版共用通知监听、按 key 更新的平铺列表和 Compose 卡片；普通版由用户授予
+  通知使用权，系统版直接注册监听。支持初始恢复、实时更新/移除、点击打开、
+  单条/全部清除及横向滑动清除。不可清除通知保留，清除等待系统回调确认。
+- 系统监听显式过滤当前用户和 USER_ALL；用户切换会注销旧监听并清空列表。
+  关闭时先禁用回调，再注销 Binder，避免排队事件恢复已关闭的连接。
+  普通版监听归 Android 管理，关闭窗口服务不撤销用户授权。
+- 锁屏/熄屏隐藏内容并禁止通知操作；屏幕关闭后收到通知也不会提前恢复内容。
+  点击通知先释放面板焦点；Android 14+ 显式提供 PendingIntent 后台启动选项，
+  系统版声明 START_ACTIVITIES_FROM_BACKGROUND。自动取消以实际打开时的最新通知为准。
+- JBR 17.0.14、SDK 36、Gradle 8.11.1；设置当前进程 GRADLE_USER_HOME 为已有缓存，
+  沿用 JAVA_TOOL_OPTIONS 的 pipe 回退。最终离线执行：
+
+  ```powershell
+  .\gradlew.bat :app:testDemoDebugUnitTest :app:testSystemDebugUnitTest :app:assembleDemoDebug :app:assembleSystemDebug :app:lintDemoDebug :app:lintSystemDebug --offline --no-daemon '-Pkotlin.compiler.execution.strategy=in-process'
+  ```
+
+- 最终退出码 0：普通版 24 项、系统版 35 项测试全部通过，0 failures / errors / skipped。
+  两版 assemble 成功。lint 普通版 0 errors / 18 warnings，系统版 0 errors / 42 warnings；
+  包含已有资源、依赖与系统隐藏 API 提示。合并 Manifest 核对通过：监听服务仅在普通版
+  声明，exported=false，受 BIND_NOTIFICATION_LISTENER_SERVICE 保护；系统版手动注册。
+- 回归测试覆盖同 key 更新、初始恢复、摘要/自身服务过滤、不可清除通知、清除失败、
+  旧连接回调、重连快照、锁屏/熄屏保护、释放焦点后打开、过期 PendingIntent、面板
+  关闭不清除通知，以及点击等待期间更新自动取消标志。系统测试覆盖注册幂等、用户
+  过滤、切换用户、部分注册失败和停止回调后注销。
+- 独立代码审查发现自动取消标志读取过早；先用回归测试重现，再修复并通过复查。
+  `git diff --check` 通过。
+- Android 15 模拟器 emulator-5558 安装普通版，验证面板滚动至通知区、未连接提示、
+  通知使用权入口打开系统 NotificationAccessSettingsActivity。未修改通知使用权；
+  测试后停止窗口服务、恢复原前台应用。真实通知读取/打开/清除由单元测试覆盖，
+  本次未在未授权模拟器执行实际监听。系统版需 Android 16 目标 ROM、平台签名及
+  系统权限验证实际 Binder 注册与系统窗口；本次未宣称完成该设备验证。
+- 最终日志为 `app/build/notification-validation.log`，报告、界面截图和 UI 树为
+  `app/build/notification-validation/`。功能与接入方式见 README“通知”一节。
+
 ## CommandQueue 系统栏命令验证（2026-10-26）
 
 - 新增系统版 `IStatusBar` Binder 注册与快照恢复，主线程分发图标、disable、外观区域、

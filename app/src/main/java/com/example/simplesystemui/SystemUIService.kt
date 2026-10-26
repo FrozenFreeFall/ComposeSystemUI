@@ -16,6 +16,7 @@ import android.widget.Toast
 import com.example.simplesystemui.platform.PlatformWindowApi
 import com.example.simplesystemui.platform.BackAccessibilityService
 import com.example.simplesystemui.platform.CommandQueue
+import com.example.simplesystemui.platform.NotificationAccess
 import com.example.simplesystemui.window.SystemWindowHost
 
 /** Service 负责窗口、设备监听和通知的生命周期。 */
@@ -24,6 +25,7 @@ class SystemUIService : Service() {
     private lateinit var controller: SystemUiController
     private lateinit var windows: SystemWindowHost
     private var commandQueue: CommandQueue? = null
+    private var notificationAccess: NotificationAccess? = null
     private var ready = false
     private var failure: String? = null
 
@@ -36,7 +38,7 @@ class SystemUIService : Service() {
             } else {
                 check(Settings.canDrawOverlays(this)) { "请先在控制台授权悬浮窗" }
             }
-            controller = SystemUiController(this) { stopSelf() }
+            controller = SystemUiController(this, app.notifications) { stopSelf() }
             windows = SystemWindowHost(this, controller)
             controller.onWindowsChanged = {
                 try { windows.render() } catch (error: Exception) { fail(error) }
@@ -47,6 +49,8 @@ class SystemUIService : Service() {
             }
             windows.attach()
             controller.start()
+            app.notifications.start()
+            notificationAccess = NotificationAccess(this, app.notifications).also { it.start() }
             commandQueue = CommandQueue(this, controller, ::fail)
             controller.onSystemBarInteraction = { commandQueue?.touchAutoHide() }
             commandQueue?.start()
@@ -116,8 +120,11 @@ class SystemUIService : Service() {
         BackAccessibilityService.onConnectionChanged = null
         commandQueue?.close()
         commandQueue = null
+        notificationAccess?.close()
+        notificationAccess = null
         if (::controller.isInitialized) controller.close()
         if (::windows.isInitialized) windows.close()
+        app.notifications.stop()
         stopForeground(STOP_FOREGROUND_REMOVE)
         app.reportStatus(ServiceStatus(false, failure ?: "服务已停止，三个窗口已释放"))
         super.onDestroy()

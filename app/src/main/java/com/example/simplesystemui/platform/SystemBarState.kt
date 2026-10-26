@@ -18,6 +18,7 @@ data class SystemBarState(
     val shadeEnabled get() = disabled1 and 0x00010000 == 0 && disabled2 and 4 == 0
     val quickSettingsEnabled get() = shadeEnabled && disabled2 and 1 == 0
     val clockVisible get() = disabled1 and 0x00800000 == 0
+    val notificationIconsVisible get() = disabled1 and 0x00020000 == 0
     val systemIconsVisible get() = disabled1 and 0x00100000 == 0 && disabled2 and 2 == 0
     val backDismissesIme get() = imeVisible && imeBackDisposition in 0..2
     val backEnabled get() = backDismissesIme || disabled1 and 0x00400000 == 0

@@ -21,6 +21,8 @@
         tools:ignore="ProtectedPermissions" />
     <uses-permission android:name="android.permission.MONITOR_INPUT"
         tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.START_ACTIVITIES_FROM_BACKGROUND"
+        tools:ignore="ProtectedPermissions" />
 
     <application>
         <service android:name=".SystemUIService"

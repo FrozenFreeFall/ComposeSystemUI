@@ -1,6 +1,9 @@
 package com.example.simplesystemui
 
 import android.content.Context
+import android.app.ActivityOptions
+import android.app.PendingIntent
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
@@ -14,6 +17,7 @@ import com.example.simplesystemui.data.DeviceRepository
 import com.example.simplesystemui.data.DeviceState
 import com.example.simplesystemui.data.RecentTask
 import com.example.simplesystemui.data.RecentTasksRepository
+import com.example.simplesystemui.data.NotificationRepository
 import com.example.simplesystemui.platform.SystemActionExecutor
 import com.example.simplesystemui.platform.BarAppearanceRegion
 import com.example.simplesystemui.platform.SystemBarCallbacks
@@ -23,10 +27,14 @@ import java.util.concurrent.Executors
 
 enum class InputTarget { APP, NAVIGATION, SHADE, RECENTS }
 enum class NavigationAction { BACK, HOME, RECENTS }
-enum class SettingsPage { WIFI, BLUETOOTH, DISPLAY, ALL }
+enum class SettingsPage { WIFI, BLUETOOTH, DISPLAY, ALL, NOTIFICATIONS }
 
 /** 按钮直接调用方法，Compose 直接读取属性，不需要 Flow、Store 或事件队列。 */
-class SystemUiController(private val context: Context, private val stopService: () -> Unit) : SystemBarCallbacks {
+class SystemUiController(
+    private val context: Context,
+    val notifications: NotificationRepository = NotificationRepository(context),
+    private val stopService: () -> Unit,
+) : SystemBarCallbacks {
     var systemBars by mutableStateOf(SystemBarState())
         private set
     var statusIcons by mutableStateOf<Map<String, SystemStatusIcon>>(emptyMap())
@@ -81,6 +89,7 @@ class SystemUiController(private val context: Context, private val stopService: 
 
     fun openShade() {
         if (closed || !systemBars.shadeEnabled || shadeVisible) return
+        notifications.refreshLockState()
         shadeReturnTarget = if (recentsVisible) recentsReturnTarget else inputTarget
         message = null
         changeTarget(InputTarget.SHADE)
@@ -88,6 +97,37 @@ class SystemUiController(private val context: Context, private val stopService: 
 
     fun closeShade() {
         if (shadeVisible) changeTarget(shadeReturnTarget)
+    }
+
+    fun openNotification(key: String) {
+        if (closed) return
+        notifications.refreshLockState()
+        if (notifications.locked) { showMessage("请先解锁后查看通知"); return }
+        val pending = notifications.contentIntent(key) ?: return
+        afterReleasingInput {
+            notifications.refreshLockState()
+            if (notifications.locked || notifications.contentIntent(key) != pending) return@afterReleasingInput
+            try {
+                val options = if (Build.VERSION.SDK_INT >= 34) ActivityOptions.makeBasic().apply {
+                    // A deliberate click may open an app after the overlay releases focus.
+                    setPendingIntentBackgroundActivityStartMode(if (Build.VERSION.SDK_INT >= 36)
+                        ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOW_ALWAYS
+                    else ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOWED)
+                }.toBundle() else null
+                pending.send(context, 0, null, null, null, null, options)
+                if (notifications.shouldAutoCancel(key) && notifications.contentIntent(key) == pending) {
+                    notifications.dismiss(key)
+                }
+            } catch (_: PendingIntent.CanceledException) {
+                showMessage("通知已失效，请等待应用更新通知")
+            }
+        }
+    }
+
+    fun dismissNotification(key: String) { if (!closed) notifications.dismiss(key) }
+    fun clearNotifications() { if (!closed) notifications.dismissAll() }
+    fun openNotificationAccessSettings() {
+        afterReleasingInput { actions.openSettings(SettingsPage.NOTIFICATIONS) }
     }
 
     fun focusNavigation() {

@@ -100,6 +100,14 @@ private fun StatusBar(controller: SystemUiController) {
             }
             StatusBarForeground(controller) { Text("SYSTEM UI", fontSize = 14.sp, fontWeight = FontWeight.Bold) }
             if (bars.clockVisible) StatusBarForeground(controller) { Text(controller.device.date, fontSize = 12.sp) }
+            if (bars.notificationIconsVisible && controller.notifications.items.isNotEmpty()) {
+                StatusBarForeground(controller) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Rounded.Notifications, "未清除的通知", Modifier.size(18.dp))
+                        Text("${controller.notifications.items.size}", fontSize = 12.sp)
+                    }
+                }
+            }
             Spacer(Modifier.weight(1f))
             if (bars.systemIconsVisible) {
                 SystemStatusIcons(controller)
@@ -247,6 +255,20 @@ private fun NotificationShade(controller: SystemUiController, scrollState: Scrol
                         TvAction("停止窗口服务", Icons.Rounded.PowerSettingsNew, Modifier.weight(1f)) { controller.stop() }
                     }
                     } else Text("快捷设置已被系统禁用", fontSize = 14.sp)
+                    HorizontalDivider()
+                    if (controller.notifications.locked) {
+                        Text("解锁后查看通知", fontSize = 16.sp)
+                    } else {
+                        NotificationsSection(
+                            items = controller.notifications.items,
+                            connected = controller.notifications.connected,
+                            error = controller.notifications.error,
+                            onOpen = controller::openNotification,
+                            onDismiss = controller::dismissNotification,
+                            onClearAll = controller::clearNotifications,
+                            onAccessSettings = if (BuildConfig.SYSTEM_UI) null else controller::openNotificationAccessSettings,
+                        )
+                    }
                     controller.message?.let { Text(it, fontSize = 14.sp, color = MaterialTheme.colorScheme.primary) }
                     Text("方向键移动 · 确认执行 · 返回关闭", fontSize = 12.sp)
                 }

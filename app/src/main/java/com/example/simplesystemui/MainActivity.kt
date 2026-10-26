@@ -29,18 +29,23 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
+import androidx.core.app.NotificationManagerCompat
 import com.example.simplesystemui.ui.SystemUiTheme
 import com.example.simplesystemui.ui.TvAction
 import com.example.simplesystemui.platform.BackAccessibilityService
+import com.example.simplesystemui.platform.SystemActionExecutor
 
 /** 演示控制台。窗口由 Service 管理，关闭此 Activity 后仍然显示。 */
 class MainActivity : ComponentActivity() {
     private val app get() = application as SystemUIApplication
     private var overlayAllowed by mutableStateOf(false)
+    private var notificationAccessAllowed by mutableStateOf(false)
 
     override fun onResume() {
         super.onResume()
         overlayAllowed = BuildConfig.SYSTEM_UI || Settings.canDrawOverlays(this)
+        notificationAccessAllowed = BuildConfig.SYSTEM_UI ||
+            NotificationManagerCompat.getEnabledListenerPackages(this).contains(packageName)
     }
 
     private fun requestOverlayPermission() {
@@ -86,7 +91,12 @@ class MainActivity : ComponentActivity() {
                                 TvAction("启用全局导航", Icons.AutoMirrored.Rounded.ArrowBack) { requestGlobalNavigationPermission() }
                             }
                             Text("全局导航服务：${if (BackAccessibilityService.connected) "已开启" else "未开启"}。用于返回和最近任务，不读取屏幕内容。", fontSize = 14.sp)
+                            TvAction("开启通知使用权", Icons.Rounded.Notifications) {
+                                try { SystemActionExecutor(this@MainActivity).openSettings(SettingsPage.NOTIFICATIONS) }
+                                catch (error: Exception) { app.reportStatus(ServiceStatus(status.running, error.message ?: "无法打开通知设置")) }
+                            }
                         }
+                        Text("通知：${if (app.notifications.connected) "已连接" else if (notificationAccessAllowed) "等待连接" else "未开启通知使用权"}。用于显示通知和执行打开、清除操作。", fontSize = 14.sp)
                         Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                             TvAction("显示窗口", Icons.Rounded.PlayArrow, Modifier.focusRequester(focus)) { command(SystemUIService.ACTION_START) }
                             TvAction("停止服务", Icons.Rounded.Stop) { stopWindowService() }

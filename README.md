@@ -134,6 +134,32 @@ Android 16 的此服务接口没有 unregister 方法；下次启动重新注册
 核对；transaction ID 和 Parcelable Creator 从运行 ROM 读取。厂商修改参数布局时仍需适配。
 生物识别、锁屏、电源菜单、Toast 等其它 `IStatusBar` 职责尚未实现，本项目仍是系统栏演示。
 
+## 通知
+
+两版共用 `SimpleNotificationListener`、`NotificationRepository` 和 Compose 通知卡片。
+收到通知先写入按 key 保存的列表；同 key 更新原卡片；系统移除后删除卡片。
+列表按发布时间倒序显示应用、标题、正文和时间，状态栏显示通知数量。
+通知在现有快捷面板下方显示，快捷设置被禁用时仍可查看通知。
+
+- 普通版：在控制台点击“开启通知使用权”，由用户在系统设置中允许
+  “Simple SystemUI 通知”。Android 随后绑定监听服务；未授权时显示设置入口。
+  通知使用权与悬浮窗权限、`POST_NOTIFICATIONS` 发通知权限是不同的权限。
+- 系统版：窗口服务启动时，用系统权限直接注册同一个监听器，停止时注销。
+  注册和注销的隐藏接口按 Android 16 对接，系统版需要平台签名、系统 UID 和
+  `STATUS_BAR_SERVICE`；无需去设置中手动授予通知使用权。
+  显式过滤当前用户，切换用户后清空旧列表并重新注册。
+
+点击有打开动作的卡片，先关闭面板、释放按键焦点，再发送通知原有的 `PendingIntent`。
+配置为点击后自动取消的通知，会请求系统清除；失效的动作会显示提示。
+可清除通知支持“清除”、横向滑动和“全部清除”；不可清除的通知保留。
+清除请求等待系统回调确认，关闭面板不会清空通知。
+
+这是一份平铺列表，不实现通知分组、重要性排名、顶部横幅、直接回复或自定义
+`RemoteViews`。分组摘要和本应用的窗口服务通知不进入列表，子通知正常显示。
+不重复播放提示音或振动，由设备原有通知服务处理。锁屏或熄屏时隐藏通知内容并
+阻止打开、清除操作，解锁后恢复；不实现锁屏通知界面。
+普通版能读取的范围受系统通知使用权和隐私策略限制。
+
 ## 最近任务
 
 系统版点击导航栏或控制台的“最近任务”，在现有面板窗口显示任务卡片，与快捷面板互斥。
@@ -158,6 +184,11 @@ Compose。关闭面板会清空预览并忽略旧请求结果；停止服务会�
 - `SystemUiController.kt`：按钮直接调用的简单方法和 Compose 状态。
 - `data/DeviceRepository.kt`：时间、电量、Wi-Fi、亮度的系统回调。
 - `data/RecentTasksRepository.kt`：最近任务列表、图标、截图与系统任务操作。
+- `data/NotificationRepository.kt`：共用通知列表、更新、清除与锁屏内容保护。
+- `data/SimpleNotificationListener.kt`：共用通知监听、初始恢复和连接生命周期。
+- `ui/NotificationsSection.kt`：通知卡片、点击、清除、横滑及连接/空列表状态。
+- `src/demo/.../platform/NotificationAccess.kt`：普通版通知使用权检查及重连请求。
+- `src/system/.../platform/NotificationAccess.kt`：系统监听注册、用户隔离和注销。
 - `ui/RecentsPanel.kt`：最近任务卡片、上滑移除、遥控器操作及加载/错误状态。
 - `window/SystemWindowHost.kt`：`addView`、显示/隐藏面板、切换按键焦点。
 - `window/VerticalSwipeHandler.kt`：状态栏下拉、面板上滑识别、滑动距离与松手速度。
