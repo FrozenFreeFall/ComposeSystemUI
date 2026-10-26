@@ -15,6 +15,7 @@ import android.util.Log
 import android.widget.Toast
 import com.example.simplesystemui.platform.PlatformWindowApi
 import com.example.simplesystemui.platform.BackAccessibilityService
+import com.example.simplesystemui.platform.CommandQueue
 import com.example.simplesystemui.window.SystemWindowHost
 
 /** Service 负责窗口、设备监听和通知的生命周期。 */
@@ -22,6 +23,7 @@ class SystemUIService : Service() {
     private val app get() = application as SystemUIApplication
     private lateinit var controller: SystemUiController
     private lateinit var windows: SystemWindowHost
+    private var commandQueue: CommandQueue? = null
     private var ready = false
     private var failure: String? = null
 
@@ -45,6 +47,10 @@ class SystemUIService : Service() {
             }
             windows.attach()
             controller.start()
+            commandQueue = CommandQueue(this, controller, ::fail)
+            controller.onSystemBarInteraction = { commandQueue?.touchAutoHide() }
+            commandQueue?.start()
+            if (failure != null) return
             ready = true
             val mode = if (BuildConfig.SYSTEM_UI) "系统原生 SystemUI 窗口" else "普通应用悬浮窗"
             app.reportStatus(ServiceStatus(true, "$mode 已显示：状态栏 / 导航栏 / 快捷面板"))
@@ -108,6 +114,8 @@ class SystemUIService : Service() {
     override fun onDestroy() {
         ready = false
         BackAccessibilityService.onConnectionChanged = null
+        commandQueue?.close()
+        commandQueue = null
         if (::controller.isInitialized) controller.close()
         if (::windows.isInitialized) windows.close()
         stopForeground(STOP_FOREGROUND_REMOVE)

@@ -124,7 +124,8 @@ class SystemWindowHost(private val context: Context, private val controller: Sys
         val swipe = when (kind) {
             WindowKind.STATUS -> VerticalSwipeHandler(
                 themed, SwipeDirection.DOWN,
-                canStart = { !controller.panelVisible && entries.any { it.kind == WindowKind.SHADE } },
+                canStart = { controller.systemBars.shadeEnabled && !controller.panelVisible &&
+                    entries.any { it.kind == WindowKind.SHADE } },
                 onStart = ::startShadeDrag,
                 onDrag = { distance -> updateShadeHeight(dragStartHeight + distance) },
                 onEnd = ::finishShadeDrag,
@@ -140,6 +141,11 @@ class SystemWindowHost(private val context: Context, private val controller: Sys
         }
         val root = object : FrameLayout(themed) {
             override fun dispatchTouchEvent(event: MotionEvent): Boolean {
+                if (event.actionMasked == MotionEvent.ACTION_DOWN) controller.setSystemBarTouchActive(true)
+                if (event.actionMasked == MotionEvent.ACTION_UP || event.actionMasked == MotionEvent.ACTION_CANCEL) {
+                    controller.setSystemBarTouchActive(false)
+                }
+                controller.onSystemBarInteraction()
                 if (kind == WindowKind.SHADE && event.actionMasked == MotionEvent.ACTION_DOWN) {
                     // Choose scrolling or closing once per gesture. A later gesture can close
                     // after content reaches its end; areas outside the scrolling column always can.
@@ -226,6 +232,13 @@ class SystemWindowHost(private val context: Context, private val controller: Sys
         shadePreview = false
         // First release focus from all windows, then give it to exactly one target.
         entries.forEach { entry -> setFocusable(entry, false) }
+        entries.filter { it.kind != WindowKind.SHADE }.forEach { entry ->
+            val visible = if (entry.kind == WindowKind.STATUS) controller.systemBars.statusBarVisible
+                else controller.systemBars.navigationBarVisible
+            // Insets providers retain their frames; WMS controls their surfaces while hidden.
+            entry.root.visibility = if (BuildConfig.SYSTEM_UI || visible) View.VISIBLE else View.GONE
+            entry.owner.visible(visible)
+        }
         val shade = entries.firstOrNull { it.kind == WindowKind.SHADE }
         shade?.apply {
             setTouchable(this, true)
@@ -240,12 +253,15 @@ class SystemWindowHost(private val context: Context, private val controller: Sys
             InputTarget.SHADE -> shade
             InputTarget.RECENTS -> shade
         }
-        target?.let { setFocusable(it, true) }
-        edgeBack.setEnabled(BuildConfig.SYSTEM_UI || BackAccessibilityService.connected ||
-            controller.inputTarget != InputTarget.APP)
+        target?.takeIf { it.root.visibility == View.VISIBLE &&
+            (it.kind != WindowKind.NAVIGATION || controller.systemBars.navigationBarVisible) }
+            ?.let { setFocusable(it, true) }
+        edgeBack.setEnabled(controller.systemBars.backEnabled && (BuildConfig.SYSTEM_UI ||
+            BackAccessibilityService.connected || controller.inputTarget != InputTarget.APP))
     }
 
     private fun startShadeDrag() {
+        if (!controller.systemBars.shadeEnabled) return
         val shade = entries.firstOrNull { it.kind == WindowKind.SHADE } ?: return
         cancelShadeAnimation()
         dragStartHeight = shadeHeight
@@ -355,6 +371,7 @@ class SystemWindowHost(private val context: Context, private val controller: Sys
     }
 
     fun close() {
+        controller.setSystemBarTouchActive(false)
         edgeBack.close()
         statusBarSwipe?.reset()
         statusBarSwipe = null
