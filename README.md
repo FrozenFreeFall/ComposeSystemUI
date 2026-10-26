@@ -3,7 +3,8 @@
 Kotlin + Compose 的简单 SystemUI 窗口 demo，同一份界面支持系统应用和普通应用。
 没有 Flow、Store、Reducer、Intent/Effect 分发或业务协程。按钮直接调用
 `SystemUiController` 的方法，Compose 用 `mutableStateOf` 更新界面；设备状态用
-`BroadcastReceiver` 和 `ContentObserver` 回调更新。
+`BroadcastReceiver` 和 `ContentObserver` 回调更新。系统版通过 `CommandQueue`
+接收系统栏命令，再在主线程直接调用控制器。
 
 
 ![](./doc/preview_test.gif)
@@ -105,6 +106,34 @@ Wi-Fi 按钮打开系统 Wi-Fi 设置，亮度调整需要“授权修改系统�
 打包进 APK，系统版运行时使用 ROM 的真实实现。普通版不依赖这些隐藏类型。
 系统权限不足或 API 不可用时，系统版启动会报错，不切换到普通版输入窗。
 
+## 系统栏命令
+
+系统版启动窗口后，`CommandQueue` 向 `StatusBarManagerService.registerStatusBar()`
+注册 `IStatusBar` Binder，先应用注册返回的图标、禁用标志、外观、IME 和临时栏快照，
+再处理排队的实时命令。普通版的同名类为空实现，不向系统注册。
+
+目前对接已有界面的命令包括：
+
+- `setIcon` / `removeIcon`：按 slot 更新图标，处理可见性、资源所属用户、level 和描述。
+- `disable` / `disableForAllDisplays`：控制时钟、系统图标、面板、快捷设置和导航按钮。
+  禁用面板会取消拖动预览并关闭已打开的面板；控制台、手势和系统命令均遵守禁用状态。
+- `onSystemBarAttributesChanged`：按屏幕坐标的 `AppearanceRegion` 更新图标明暗，
+  处理透明 / 不透明背景。保存应用的显示请求，实际栏显示状态以 WMS 为准。
+- `setWindowState`、`showTransient` / `abortTransient`：同步显示与临时栏状态。
+  临时栏按无障碍推荐超时自动隐藏；面板打开、持有导航焦点或手指按住时暂停。
+- `setImeWindowStatus`：同步收起键盘的返回图标和输入法切换入口。
+- 面板展开、收起、切换，以及最近任务显示、隐藏和切换命令。
+
+带 displayId 的命令只作用于默认显示器，与当前窗口宿主一致。Binder 线程只解码数据，
+Compose 和窗口更新都在主线程执行。停止服务会清理排队任务、自动隐藏计时和控制器引用。
+Android 16 的此服务接口没有 unregister 方法；下次启动重新注册。
+
+系统栏的根窗口持续提供 Insets，隐藏时保留窗口和 frame，由 WMS 控制 surface，避免
+沉浸模式恢复及忽略可见性的 Insets 查询出错。接口参数按
+[Android 16 IStatusBar](https://github.com/aosp-mirror/platform_frameworks_base/blob/android16-release/core/java/com/android/internal/statusbar/IStatusBar.aidl)
+核对；transaction ID 和 Parcelable Creator 从运行 ROM 读取。厂商修改参数布局时仍需适配。
+生物识别、锁屏、电源菜单、Toast 等其它 `IStatusBar` 职责尚未实现，本项目仍是系统栏演示。
+
 ## 最近任务
 
 系统版点击导航栏或控制台的“最近任务”，在现有面板窗口显示任务卡片，与快捷面板互斥。
@@ -140,6 +169,9 @@ Compose。关闭面板会清空预览并忽略旧请求结果；停止服务会�
 - `platform/BackAccessibilityService.kt`：普通版的全局返回和原生最近任务接口。
 - `platform/SystemWindowTypes.kt`：两种窗口 type。
 - `platform/PlatformWindowApi.kt`：系统版 Insets 隐藏 API 桥接。
+- `src/system/.../platform/CommandQueue.kt`：系统栏 Binder 注册、初始快照、主线程分发和临时栏自动隐藏。
+- `platform/SystemBarState.kt`：系统栏禁用、外观、显示和输入法状态。
+- `ui/SystemStatusIcons.kt`：系统 slot 图标加载与显示。
 
 窗口默认不抢按键。点击“控制导航栏”后可以用方向键操作；返回或“释放焦点”
 把按键交还前台应用。导航操作会等待窗口释放焦点后执行。

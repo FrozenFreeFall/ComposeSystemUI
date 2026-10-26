@@ -1,5 +1,33 @@
 # 简化版构建与验证
 
+## CommandQueue 系统栏命令验证（2026-10-26）
+
+- 新增系统版 `IStatusBar` Binder 注册与快照恢复，主线程分发图标、disable、外观区域、
+  窗口状态、临时栏、IME、面板和最近任务命令；普通版使用空桥接。
+- 核对 Android 16 官方 AIDL / Parcelable，支持 `disableForAllDisplays` 的
+  `DisableStates.displaysWithStates`，使用 ROM 的 transaction ID 和 Parcelable Creator。
+- 状态栏 / 导航栏 Insets provider 根视图保留，由 WMS 控制 surface；逻辑可见性使用
+  WMS windowState，应用 requestedVisibleTypes 不覆盖 IME / 分屏强制显示。
+- 临时栏使用无障碍推荐超时调用 `IWindowManager.hideTransientBars(0)`，清理本地
+  transient 状态；面板、导航焦点、触摸按住期间暂停，交互后重新计时。
+- JDK 21、Gradle 8.11.1、SDK 36；沿用 pipe 回退与进程内 Kotlin 编译。最终离线执行：
+
+  ```powershell
+  .\gradlew.bat :app:testDemoDebugUnitTest :app:testSystemDebugUnitTest :app:assembleDemoDebug :app:assembleSystemDebug :app:lintDemoDebug :app:lintSystemDebug --offline --no-daemon '-Pkotlin.compiler.execution.strategy=in-process'
+  ```
+
+- 最终退出码 0。普通版 10 项测试、系统版 16 项测试均通过，0 failures / errors / skipped。
+  两版 assemble 成功；lint 普通版 0 errors / 18 warnings，系统版 0 errors / 40 warnings。
+  警告包含现有资源和依赖提示，以及系统版有意使用的非 SDK 接口反射。
+- 状态策略单测覆盖 flag 隔离、分区图标明暗、临时栏、WMS 强制显示与 IME 返回；
+  控制器测试覆盖入口禁用、关闭面板、焦点释放和不打断拖动的外观更新。
+  系统版 Binder 测试使用真实 Parcel，覆盖主线程排队、默认屏过滤、close 丢弃任务、
+  命令参数顺序、自动隐藏服务调用及长按暂停。
+- Robolectric 使用 API 35 的框架测试环境；Android 16 特有的 `DisableStates` 和
+  注册快照字段按官方源码核对，尚未在 API 36 真机运行。完整注册、实际 WMS surface / Insets、
+  厂商图标资源、IME 切换与沉浸模式仍需目标 ROM、匹配平台签名及系统权限验证。
+- 构建日志与下载的官方参考源码保存在 `app/build/command-queue-validation/`。
+
 日期：2026-10-13。
 
 本次改动移除 MVI / Flow / 业务协程，新增 `demo`、`system` 两个构建版本。

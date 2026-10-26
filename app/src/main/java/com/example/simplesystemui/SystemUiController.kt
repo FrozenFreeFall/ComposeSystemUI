@@ -5,6 +5,7 @@ import android.os.Handler
 import android.os.Looper
 import android.util.Log
 import android.widget.Toast
+import android.view.inputmethod.InputMethodManager
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.mutableIntStateOf
@@ -14,6 +15,10 @@ import com.example.simplesystemui.data.DeviceState
 import com.example.simplesystemui.data.RecentTask
 import com.example.simplesystemui.data.RecentTasksRepository
 import com.example.simplesystemui.platform.SystemActionExecutor
+import com.example.simplesystemui.platform.BarAppearanceRegion
+import com.example.simplesystemui.platform.SystemBarCallbacks
+import com.example.simplesystemui.platform.SystemBarState
+import com.example.simplesystemui.platform.SystemStatusIcon
 import java.util.concurrent.Executors
 
 enum class InputTarget { APP, NAVIGATION, SHADE, RECENTS }
@@ -21,7 +26,11 @@ enum class NavigationAction { BACK, HOME, RECENTS }
 enum class SettingsPage { WIFI, BLUETOOTH, DISPLAY, ALL }
 
 /** 按钮直接调用方法，Compose 直接读取属性，不需要 Flow、Store 或事件队列。 */
-class SystemUiController(private val context: Context, private val stopService: () -> Unit) {
+class SystemUiController(private val context: Context, private val stopService: () -> Unit) : SystemBarCallbacks {
+    var systemBars by mutableStateOf(SystemBarState())
+        private set
+    var statusIcons by mutableStateOf<Map<String, SystemStatusIcon>>(emptyMap())
+        private set
     var device by mutableStateOf(DeviceState())
         private set
     var inputTarget by mutableStateOf(InputTarget.APP)
@@ -41,8 +50,15 @@ class SystemUiController(private val context: Context, private val stopService: 
     val shadeVisible get() = inputTarget == InputTarget.SHADE
     val recentsVisible get() = inputTarget == InputTarget.RECENTS
     val panelVisible get() = shadeVisible || recentsVisible
+    private var systemBarTouchActive = false
+    override val transientAutoHideSuspended get() = systemBarTouchActive || inputTarget != InputTarget.APP
 
     var onWindowsChanged: () -> Unit = {}
+    var onSystemBarInteraction: () -> Unit = {}
+    fun setSystemBarTouchActive(active: Boolean) {
+        systemBarTouchActive = active
+        onSystemBarInteraction()
+    }
     var runAfterInputReleased: ((() -> Unit) -> Unit) = { it() }
     private val devices = DeviceRepository(context)
     private val actions = SystemActionExecutor(context)
@@ -64,7 +80,7 @@ class SystemUiController(private val context: Context, private val stopService: 
     }
 
     fun openShade() {
-        if (shadeVisible) return
+        if (closed || !systemBars.shadeEnabled || shadeVisible) return
         shadeReturnTarget = if (recentsVisible) recentsReturnTarget else inputTarget
         message = null
         changeTarget(InputTarget.SHADE)
@@ -75,6 +91,7 @@ class SystemUiController(private val context: Context, private val stopService: 
     }
 
     fun focusNavigation() {
+        if (!systemBars.navigationBarVisible) return
         changeTarget(InputTarget.NAVIGATION)
     }
 
@@ -92,10 +109,16 @@ class SystemUiController(private val context: Context, private val stopService: 
     }
 
     fun edgeBack() {
+        if (!systemBars.backEnabled) return
         if (inputTarget == InputTarget.APP) navigate(NavigationAction.BACK) else backPressed()
     }
 
     fun navigate(action: NavigationAction) {
+        if (closed || !when (action) {
+            NavigationAction.BACK -> systemBars.backEnabled
+            NavigationAction.HOME -> systemBars.homeEnabled
+            NavigationAction.RECENTS -> systemBars.recentsEnabled
+        }) return
         if (action == NavigationAction.RECENTS && BuildConfig.SYSTEM_UI) {
             if (recentsVisible) closeRecents() else openRecents()
             return
@@ -108,7 +131,7 @@ class SystemUiController(private val context: Context, private val stopService: 
             navigate(NavigationAction.RECENTS)
             return
         }
-        if (closed || recentsVisible) return
+        if (closed || !systemBars.recentsEnabled || recentsVisible) return
         recentsReturnTarget = if (shadeVisible) shadeReturnTarget else inputTarget
         message = null
         changeTarget(InputTarget.RECENTS)
@@ -175,6 +198,7 @@ class SystemUiController(private val context: Context, private val stopService: 
     }
 
     fun toggleWifi() {
+        if (!systemBars.quickSettingsEnabled) return
         if (!BuildConfig.SYSTEM_UI) {
             openSettings(SettingsPage.WIFI)
             return
@@ -191,6 +215,7 @@ class SystemUiController(private val context: Context, private val stopService: 
     }
 
     fun adjustBrightness(delta: Int) {
+        if (!systemBars.quickSettingsEnabled) return
         safely {
             val value = (brightness + delta).coerceIn(10, 255)
             actions.setBrightness(value)
@@ -199,7 +224,75 @@ class SystemUiController(private val context: Context, private val stopService: 
     }
 
     fun openSettings(page: SettingsPage) {
+        if (!systemBars.quickSettingsEnabled) return
         afterReleasingInput { actions.openSettings(page) }
+    }
+
+    fun showImePicker() {
+        if (!BuildConfig.SYSTEM_UI || !systemBars.imeVisible || !systemBars.showImeSwitcher) return
+        afterReleasingInput { context.getSystemService(InputMethodManager::class.java).showInputMethodPicker() }
+    }
+
+    override fun onDisable(disabled1: Int, disabled2: Int) {
+        if (systemBars.disabled1 == disabled1 && systemBars.disabled2 == disabled2) return
+        updateSystemBars(systemBars.copy(disabled1 = disabled1, disabled2 = disabled2), resetWindows = true)
+    }
+
+    override fun onSystemBarAttributes(
+        appearance: Int, regions: List<BarAppearanceRegion>, behavior: Int, requestedVisibleTypes: Int,
+    ) {
+        updateSystemBars(systemBars.copy(appearance = appearance, appearanceRegions = regions,
+            behavior = behavior, requestedVisibleTypes = requestedVisibleTypes))
+    }
+
+    override fun onBarWindowState(window: Int, state: Int) {
+        val next = when (window) {
+            1 -> systemBars.copy(statusWindowState = state)
+            2 -> systemBars.copy(navigationWindowState = state)
+            else -> return
+        }
+        updateSystemBars(next)
+    }
+
+    override fun onTransientBars(types: Int, show: Boolean) {
+        updateSystemBars(systemBars.copy(transientTypes = if (show) systemBars.transientTypes or types
+            else systemBars.transientTypes and types.inv()))
+    }
+
+    override fun onImeStatus(visible: Boolean, backDisposition: Int, showSwitcher: Boolean) {
+        updateSystemBars(systemBars.copy(imeVisible = visible, imeBackDisposition = backDisposition,
+            showImeSwitcher = visible && showSwitcher))
+    }
+
+    override fun onStatusIcon(slot: String, icon: SystemStatusIcon?) {
+        if (closed) return
+        statusIcons = statusIcons.toMutableMap().apply {
+            if (icon == null) remove(slot) else put(slot, icon)
+        }.toMap()
+    }
+
+    override fun onExpandPanel() = openShade()
+    override fun onCollapsePanels() = releaseFocus()
+    override fun onTogglePanel() { if (shadeVisible) closeShade() else openShade() }
+    override fun onShowRecents() = openRecents()
+    override fun onHideRecents() = closeRecents()
+    override fun onToggleRecents() { if (recentsVisible) closeRecents() else openRecents() }
+
+    private fun updateSystemBars(next: SystemBarState, resetWindows: Boolean = false) {
+        if (closed) return
+        val previous = systemBars
+        systemBars = next
+        if (!next.navigationBarVisible) {
+            if (shadeReturnTarget == InputTarget.NAVIGATION) shadeReturnTarget = InputTarget.APP
+            if (recentsReturnTarget == InputTarget.NAVIGATION) recentsReturnTarget = InputTarget.APP
+        }
+        if ((shadeVisible && !next.shadeEnabled) || (recentsVisible && !next.recentsEnabled) ||
+            (inputTarget == InputTarget.NAVIGATION && !next.navigationBarVisible)) {
+            releaseFocus()
+        } else if (resetWindows || previous.statusBarVisible != next.statusBarVisible ||
+            previous.navigationBarVisible != next.navigationBarVisible || previous.backEnabled != next.backEnabled) {
+            onWindowsChanged()
+        }
     }
 
     fun stop() {
@@ -244,13 +337,16 @@ class SystemUiController(private val context: Context, private val stopService: 
 
     fun close() {
         closed = true
+        systemBarTouchActive = false
         recentRequest++
         taskWorker.shutdownNow()
         mainHandler.removeCallbacksAndMessages(null)
         recentTasks = emptyList()
+        statusIcons = emptyMap()
         recentsLoading = false
         devices.close()
         onWindowsChanged = {}
+        onSystemBarInteraction = {}
         runAfterInputReleased = {}
     }
 }
